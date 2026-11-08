@@ -10,7 +10,7 @@ LABEL="${3:-${OLP_E2E_LABEL:-$KEY}}"   # for output
 SLOW="${OLP_E2E_SLOW:-0}"
 CARD_LIMIT_MS=10000   # the delete card must appear within this (FAIL if over)
 DIST="$(cd "$DIST" && pwd)"
-VER="0.1.0"
+VER="0.1.1"
 
 PASS=0; FAIL=0; SKIP=0; FACT=0
 ok()   { echo "PASS  $1"; PASS=$((PASS+1)); }

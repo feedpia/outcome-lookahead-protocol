@@ -24,7 +24,7 @@ test('install goes to olp-hook.exe of the win32-x64 package with args unchanged'
   assert.deepEqual(p.args, ['install', '--dry-run']);
 });
 
-// olp-gui is not in the 0.1.0 packages → gui stops with one line of reason, no binary lookup
+// olp-gui is not packaged → gui stops with one line of reason, no binary lookup
 test('gui says the picker is not in this release', () => {
   const p = plan('darwin', 'arm64', ['gui', 'serve', '--lang', 'ko'], found('/m'));
   assert.equal(p.file, undefined);

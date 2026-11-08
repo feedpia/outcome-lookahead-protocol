@@ -435,7 +435,7 @@ fn d1_arguments_ignore_curlrc_and_redirects_with_a_short_cap() {
         let v = signal::spawn::argv("https://x/y", t);
         signal::spawn::check_argv(&v.iter().map(|s| s.as_str()).collect::<Vec<_>>())
     };
-    assert!(r(2) && r(1) && !r(3) && !r(0), "time limit allowed only at 1-2 seconds (shorter than the 3 second entry timeout)");
+    assert!((1..=5).all(r) && !r(6) && !r(0), "time limit allowed only at 1-5 seconds (SessionStart itself uses the bundled 2 s, checked above)");
     // A time limit from project config is not used
     fs::write(p.join(".olp/hook-config.json"), json!({"signal_timeout_s": 3}).to_string()).unwrap();
     assert!(ready(&p, &h).0.join(" ").contains("--max-time 2"));
@@ -497,4 +497,54 @@ fn install_dry_run_still_works_with_user_flag() {
     let env = InstallEnv { project: project.clone(), home, exe: project.join("olp-hook"), now: 1 };
     assert!(run("install", &["--dry-run".into(), "--user".into()], &env).is_ok());
     assert!(run("install", &["--yes".into()], &env).is_err());
+}
+
+// ---- B2 (0.1.1): a slow server is not reported as "not sent"; session start stays within its slot ----
+/// A local server that accepts the connection and never answers (a cold server that is still waking up).
+fn silent_server() -> (std::net::TcpListener, String) {
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let ep = format!("https://127.0.0.1:{}/v1/olp/signal", l.local_addr().unwrap().port());
+    (l, ep)
+}
+
+#[test]
+fn b2_signal_by_hand_without_a_finished_connection_says_not_sent() {
+    // The local server accepts TCP but never finishes the TLS handshake, so the request body is never sent.
+    // curl stops at its time limit (exit 28), yet "it may still have arrived" would be false here.
+    let (_l, ep) = silent_server();
+    let (project, home) = tmp("b2_hand");
+    opt_in_to(&project, &home, &ep);
+    let o = run_bin(&project, &home, &["signal"], b"", None);
+    let out = String::from_utf8_lossy(&o.stdout);
+    assert_eq!(o.status.code(), Some(0), "{}", String::from_utf8_lossy(&o.stderr));
+    assert!(out.starts_with("not sent: no connection to the server within 5 s"), "{out}");
+    assert!(!out.contains("may still have arrived"), "{out}");
+}
+
+#[test]
+fn b2_session_start_on_a_slow_server_stays_quiet_and_short() {
+    let (_l, ep) = silent_server();
+    let (project, home) = tmp("b2_start");
+    opt_in_to(&project, &home, &ep);
+    let t0 = std::time::Instant::now();
+    let o = run_bin(&project, &home, &["signal", "--session-start"], b"", None);
+    assert_eq!(o.status.code(), Some(0));
+    assert!(o.stdout.is_empty() && o.stderr.is_empty());
+    assert!(t0.elapsed() < std::time::Duration::from_secs(3), "SessionStart slot is 3 s: {:?}", t0.elapsed());
+}
+
+#[test]
+fn b2_failure_text_follows_the_curl_exit_code() {
+    use signal::spawn::failure_text;
+    // Timeout after the connection was set up (the request went out): it may still have arrived.
+    assert_eq!(failure_text(Some(28), 5, true), "no answer from the server within 5 s. It may still have arrived; no retry today.");
+    // Timeout before the connection was set up (Git for Windows curl takes about 2 s to give up on a closed port): nothing went out.
+    assert_eq!(failure_text(Some(28), 2, false), "not sent: no connection to the server within 2 s");
+    for reached in [true, false] {
+        assert_eq!(failure_text(Some(6), 5, reached), "not sent: could not reach the server");
+        assert_eq!(failure_text(Some(7), 5, reached), "not sent: could not reach the server");
+        assert_eq!(failure_text(Some(22), 5, reached), "not sent: the server answered with an error");
+        assert_eq!(failure_text(Some(35), 5, reached), "not sent: curl returned an error");
+        assert_eq!(failure_text(None, 5, reached), "not sent: curl returned an error");
+    }
 }

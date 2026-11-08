@@ -1,9 +1,9 @@
-# release.yml — build, test and publish OLP 0.1.0.
+# release.yml — build, test and publish OLP 0.1.1.
 # What it does:
 #   - push to a ci/olp-* branch (practice) = build and test on 5 targets + npm pack + release archives + e2e (5 OS, 11 environment jobs) + real Claude Code (claude -p and interactive screen recording). Publishes nothing.
 #   - push of a v* tag = the above + (only when build, pack and e2e are all green) publish the 6 npm packages + a GitHub release draft.
 #   - the video and claude jobs run only when a subscription token (CLAUDE_CODE_OAUTH_TOKEN) is set, and never block publishing.
-# olp-gui is not in the 0.1.0 packages, so only olp-hook is built.
+# olp-gui is not packaged, so only olp-hook is built.
 name: release
 
 on:
@@ -204,7 +204,7 @@ jobs:
           npm install -g @anthropic-ai/claude-code >/dev/null 2>&1 && claude --version
           export HOME="$(mktemp -d)"; P="$(mktemp -d)/proj"; mkdir -p "$P/build"; cd "$P"
           git init -q && echo a > build/a.txt && echo x > app.js && git add -A && git -c user.email=e@x -c user.name=e commit -qm init
-          npm init -y >/dev/null && npm install --no-audit --no-fund "$GITHUB_WORKSPACE/dist/feedpia-olp-${{ matrix.key }}-0.1.0.tgz" "$GITHUB_WORKSPACE/dist/feedpia-olp-0.1.0.tgz" >/dev/null
+          npm init -y >/dev/null && npm install --no-audit --no-fund "$GITHUB_WORKSPACE/dist/feedpia-olp-${{ matrix.key }}-0.1.1.tgz" "$GITHUB_WORKSPACE/dist/feedpia-olp-0.1.1.tgz" >/dev/null
           npx --no-install olp install </dev/null
           before=$(wc -l < .olp/hook-log.jsonl 2>/dev/null || echo 0)
           # One delete and one read-only run. After each, print the hook log line count and verdict (the log never holds the command text; the command comes from the denials list in the claude JSON result).

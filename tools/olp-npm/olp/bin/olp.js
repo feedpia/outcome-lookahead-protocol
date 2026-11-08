@@ -28,7 +28,7 @@ function plan(platform, arch, args, resolve) {
   if (!manifest) {
     return { error: `olp: the package for your system (${name}) was not installed. Install again without --omit=optional or --no-optional.` };
   }
-  // olp-gui is not in the 0.1.0 packages → do not look for a binary, give one line of reason
+  // olp-gui is not packaged → do not look for a binary, give one line of reason
   if (args[0] === 'gui') {
     return { error: 'olp: the file picker is not in this release. Read the card, then tell the agent what to change.' };
   }

@@ -18,6 +18,9 @@ pub struct Config {
     /// Time limit (integer seconds) for one opt-in signal, read by the signal module. Default from the bundled data file.
     #[serde(default)]
     pub signal_timeout_s: Option<u64>,
+    /// Time limit (integer seconds) when a person runs `olp-hook signal` (no SessionStart slot to stay under). Bundled data file only.
+    #[serde(default)]
+    pub signal_manual_timeout_s: Option<u64>,
     /// Picked-files-only mode (default false). Only when enabled and `olp-gui` is alive does a delete card write pending and compare with the selection (verdict unchanged).
     #[serde(default)]
     pub pick: bool,
@@ -59,6 +62,11 @@ pub fn bundled_signal_endpoint() -> Option<String> {
 /// Bundled time limit (seconds) for the usage signal. Project config values are ignored (so the sender's limit never reaches the SessionStart 3 s slot).
 pub fn bundled_signal_timeout_s() -> Option<u64> {
     bundled().signal_timeout_s
+}
+
+/// Bundled time limit (seconds) when a person runs `olp-hook signal`: long enough for a server that is waking up.
+pub fn bundled_signal_manual_timeout_s() -> Option<u64> {
+    bundled().signal_manual_timeout_s
 }
 
 /// No file = bundled default. If present, its values are used and only empty limit fields are filled from the bundled default. A malformed file is Err (the hook blocks).

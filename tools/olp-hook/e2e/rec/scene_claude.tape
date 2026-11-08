@@ -2,7 +2,7 @@
 # Assertion = Wait+Screen: if the text does not appear in time, vhs ends with a failure (= red test).
 # ① ask to delete → within 120 s a permission prompt (proceed?) + OLP card (the prompt shows the card reason «[OLP] Before this runs: delete files …») → Escape (no) → files remain in ls build
 #  ② ask to look around → result within 90 s (?? build/) — Claude Code's own prompt is suppressed by user settings; if it appears, no result shows and the test is red
-# Only the request text is @LANG@ (Korean/English); card text stays English as in 0.1.0. The start screen (may contain an account line) is hidden.
+# Only the request text is @LANG@ (Korean/English); card text stays English. The start screen (may contain an account line) is hidden.
 # @slot@ values are filled by rec_prep.sh.
 Output "@OUT@/olp-claude-@OS@-@LANG@.mp4"
 Output "@OUT@/olp-claude-@OS@-@LANG@.gif"
@@ -23,7 +23,7 @@ Type "cd '@PROJ@' && clear"
 Enter
 Sleep 500ms
 Show
-Type "# OLP 0.1.0 · @OS@ · Claude Code @CCVER@ · @LANG@  (첫 실행 안내는 건너뜀)"
+Type "# OLP 0.1.1 · @OS@ · Claude Code @CCVER@ · @LANG@  (첫 실행 안내는 건너뜀)"
 Enter
 Sleep 2500ms
 

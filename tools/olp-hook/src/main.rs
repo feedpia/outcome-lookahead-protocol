@@ -29,11 +29,46 @@ fn ask_usage() -> Option<String> {
     if !std::io::stdin().is_terminal() {
         return None;
     }
+    discard_typed_ahead();
     eprint!("{USAGE_QUESTION}");
     let mut line = String::new();
     let _ = std::io::stdin().lock().read_line(&mut line);
     Some(line)
 }
+
+/// Drops keys typed before the question is on screen (for example an Enter pressed while npx was still downloading),
+/// so only an answer typed after the question counts. Failure is ignored: the question is still asked as before.
+#[cfg(windows)]
+fn discard_typed_ahead() {
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetStdHandle(which: u32) -> *mut std::ffi::c_void;
+        fn FlushConsoleInputBuffer(input: *mut std::ffi::c_void) -> i32;
+    }
+    const STD_INPUT_HANDLE: u32 = -10i32 as u32;
+    // SAFETY: both calls take and return plain handles. GetStdHandle returns INVALID_HANDLE_VALUE on failure (null only when no handle is set); either, or a non-console handle, only makes the flush fail.
+    unsafe {
+        let input = GetStdHandle(STD_INPUT_HANDLE);
+        if !input.is_null() {
+            FlushConsoleInputBuffer(input);
+        }
+    }
+}
+
+#[cfg(unix)]
+fn discard_typed_ahead() {
+    extern "C" {
+        fn tcflush(fd: i32, queue: i32) -> i32;
+    }
+    const TCIFLUSH: i32 = if cfg!(any(target_os = "linux", target_os = "android")) { 0 } else { 1 };
+    // SAFETY: fd 0 is standard input (checked to be a terminal by the caller); a failure only means nothing was flushed.
+    unsafe {
+        tcflush(0, TCIFLUSH);
+    }
+}
+
+#[cfg(not(any(windows, unix)))]
+fn discard_typed_ahead() {}
 
 /// Home folder (consent records go only under `<home>/olp/usage/`, outside the repository).
 fn home_dir() -> Option<PathBuf> {
@@ -43,7 +78,8 @@ fn home_dir() -> Option<PathBuf> {
 /// Consent at the end of install: on yes, a home record (including install route) plus one SessionStart entry; on no, only a "no" in the home record.
 fn install_consent(env: &olp_hook::install::InstallEnv, user: bool, answer: &str) -> Result<String, String> {
     if !olp_hook::signal::consent(&env.project, &env.home, answer, olp_hook::install::install_path(&env.exe))? {
-        return Ok("Usage numbers off. Nothing will be sent.".to_string());
+        return Ok("Usage numbers off. Nothing will be sent.
+Turn on later: npx @feedpia/olp setup".to_string());
     }
     let added = olp_hook::install::edit_start(env, user, true)?;
     Ok(format!("{added}\nUsage numbers on (the fields are listed in the README). Turn off: npx @feedpia/olp telemetry off"))
@@ -145,7 +181,7 @@ fn main() {
         }
         Some("signal") => {
             let home = home_dir().unwrap_or_else(|| finish(Err("could not find your home folder".to_string())));
-            finish(olp_hook::signal::send(&project_dir(), &home))
+            finish(olp_hook::signal::send_by_hand(&project_dir(), &home))
         }
         Some("telemetry") => {
             if args[1..] != ["off"] {

@@ -3,7 +3,7 @@
 //!   The answer is stored only in a per-device file outside the repository, `<home>/olp/usage/<project path hash>.json`; a file placed in or committed to the repository is not consent.
 //! - `olp-hook signal`: once a day, sends only the closed field list v2 (`FIELDS`, same as the README table). Numeric fields count device records whose 10-minute window closed since the last send.
 //!   The endpoint comes from the bundled data file (or an `endpoint` in the home record, written by a person outside the repository). Project settings can only change it to an empty string (off). `OLP_HOOK_SIGNAL=off` always wins.
-//! - Sending goes only through the system curl via this module's spawn.rs (closed argument list, user curl config ignored, at most 3 s, no redirects). The day is recorded before the attempt, so there are no retries.
+//! - Sending goes only through the system curl via this module's spawn.rs (closed argument list, user curl config ignored, at most 2 s at session start and 5 s when a person runs `signal`, no redirects). The day is recorded before the attempt, so there are no retries.
 //! Hook, counting and PostToolUse paths never call this module (`hook_paths_never_touch_signal_wrapper`).
 
 pub mod spawn;
@@ -158,8 +158,12 @@ pub fn plan(project: &Path, home: &Path) -> Result<Plan, String> {
     plan_with(project, home, env_off(std::env::var("OLP_HOOK_SIGNAL").ok().as_deref()))
 }
 
-/// /// `env_off` = environment-variable decision (injected in tests).
+/// /// `env_off` = environment-variable decision (injected in tests). Time limit = the SessionStart one.
 pub fn plan_with(project: &Path, home: &Path, env_off: bool) -> Result<Plan, String> {
+    plan_timed(project, home, env_off, config::bundled_signal_timeout_s())
+}
+
+fn plan_timed(project: &Path, home: &Path, env_off: bool, timeout: Option<u64>) -> Result<Plan, String> {
     if env_off {
         return Ok(Plan::Off("OLP_HOOK_SIGNAL=off"));
     }
@@ -184,7 +188,7 @@ pub fn plan_with(project: &Path, home: &Path, env_off: bool) -> Result<Plan, Str
     if !endpoint.starts_with(&spawn::scheme_prefix()) {
         return Ok(Plan::Off("signal_endpoint not accepted"));
     }
-    let Some(timeout) = config::bundled_signal_timeout_s().filter(|t| *t > 0) else { return Ok(Plan::Off("no signal_timeout_s set")) };
+    let Some(timeout) = timeout.filter(|t| *t > 0) else { return Ok(Plan::Off("no signal_timeout_s set")) };
     let now = store::now();
     let from = rec["counted_to"].as_u64().unwrap_or(0);
     let counted_to = now.saturating_sub(AFTER_S).max(from);
@@ -205,8 +209,19 @@ pub fn plan_with(project: &Path, home: &Path, env_off: bool) -> Result<Plan, Str
     Ok(Plan::Ready { argv, body: body.to_string(), counted_to })
 }
 
+/// SessionStart send (bundled 2 s limit, under the 3 s entry slot).
 pub fn send(project: &Path, home: &Path) -> Result<String, String> {
-    match plan(project, home)? {
+    send_planned(project, home, plan(project, home)?)
+}
+
+/// A person ran `olp-hook signal`: wait longer (bundled manual limit), so a server that is waking up can answer.
+pub fn send_by_hand(project: &Path, home: &Path) -> Result<String, String> {
+    let off = env_off(std::env::var("OLP_HOOK_SIGNAL").ok().as_deref());
+    send_planned(project, home, plan_timed(project, home, off, config::bundled_signal_manual_timeout_s())?)
+}
+
+fn send_planned(project: &Path, home: &Path, plan: Plan) -> Result<String, String> {
+    match plan {
         Plan::Off(why) => Ok(format!("not sent: {why}")),
         Plan::Ready { argv, body, counted_to } => {
             //             // Record the day and counted end before the attempt: even on failure it is not retried the same day (no retries, so session start never spends time).
@@ -216,7 +231,7 @@ pub fn send(project: &Path, home: &Path) -> Result<String, String> {
             write_record(project, home, &rec)?;
             Ok(match spawn::run(&argv, &body) {
                 Ok(()) => "sent: the usage numbers listed in the README".to_string(),
-                Err(why) => format!("not sent: {why}"),
+                Err(why) => why,
             })
         }
     }

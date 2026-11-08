@@ -1,10 +1,10 @@
 # olp-hook — see what a write would remove, before it runs
 
-**0.1.0 · first public release**
+**0.1.1**
 
 OLP (Outcome Lookahead Protocol) is an open specification for looking ahead at the outcome of an agent's action.
 
-0.1.0: A Claude Code hook. Before a delete, its card lists which files and how many; before an overwrite, how many.
+0.1.1: A Claude Code hook. Before a delete, its card lists which files and how many; before an overwrite, how many.
 
 In Claude Code's permission prompt, before `rm -rf build` runs:
 
@@ -15,6 +15,18 @@ In Claude Code's permission prompt, before `rm -rf build` runs:
 ```
 npx @feedpia/olp install
 ```
+
+### Guide video (2 min)
+
+English subtitles:
+
+https://github.com/user-attachments/assets/90489855-3ca4-4792-8889-cf647e7c7fd5
+
+Korean subtitles:
+
+https://github.com/user-attachments/assets/3d8dd4bc-a772-435c-88a5-6efbc3443e76
+
+Recorded on 0.1.0. The card behaves the same in 0.1.1.
 
 **Before an irreversible yes, see what it will change.**
 
@@ -41,7 +53,7 @@ npx @feedpia/olp install
 - `--dry-run` shows what would change without changing anything. `--user` uses your user settings (`~/.claude/settings.json`) instead. `--replace` points an existing `olp-hook` entry at the new copy.
 - Run in your home folder without `--user`, install changes nothing and stops: the settings file there applies to every project. Run it inside a project folder, or add `--user` if you want that.
 - `{"decision": true}` in `.olp/hook-config.json` (experimental, off by default): when a delete covers 2 or more files and some of them are not in git, the hook stops it once and gives the agent three options to ask you about (cancel first, then keep some, then delete all). Your choice is the agent's next instruction; the next delete shows the usual card and permission prompt.
-- Update: re-run the install command (`npx @feedpia/olp install`). Version 0.1.0 has no self-update.
+- Update: re-run the install command (`npx @feedpia/olp install`). Version 0.1.1 has no self-update.
 - Undo: `npx @feedpia/olp uninstall` removes only the `olp-hook` lines. The programs in `olp` are left; delete that folder if you no longer need them.
 - The copy is checked byte for byte against the one in the package. That only shows the copy is intact; it does not show the package is ours. Check the release's `SHA256SUMS` for that.
 - Downloaded from Releases instead? Unpack `olp-hook-<os>-<arch>.zip`/`.tar.gz` somewhere outside your project (the program inside is `olp-hook`, `olp-hook.exe` on Windows — do not rename it). On macOS, a browser download is blocked as unsigned until you run `xattr -d com.apple.quarantine <path>/olp-hook`. Then, inside your project, run that file with `install`: `~/Downloads/olp-hook install` (Windows: `~\Downloads\olp-hook.exe install`). It copies itself to `~/olp/` and writes the full path into `.claude/settings.json`. If the program was renamed, install changes nothing and stops with a one-line reason.
@@ -186,7 +198,7 @@ Run `olp-hook watch` in another terminal tab, or `olp-hook watch --html [--lang 
 
 ## Optional daily usage numbers (off by default)
 
-At the end of `npx @feedpia/olp install`, in a terminal, you are asked once: "Send anonymous daily usage numbers to FeedPia? (counts only, no commands or file names) [y/N]". Pressing Enter means no. Only a person typing `y` at this prompt says yes. No command option or environment variable says yes, and no file inside the project counts as a yes. When the install runs without a terminal (a pipe, CI or an agent) it does not ask and sends nothing. `olp-hook setup` asks the same question for a project you set up by hand, and is also how you turn it back on later. Only people who say yes send anything.
+At the end of `npx @feedpia/olp install`, in a terminal, you are asked once: "Send anonymous daily usage numbers to FeedPia? (counts only, no commands or file names) [y/N]". Pressing Enter means no. Keys pressed before the question appears are dropped, so only an answer typed after it counts. Only a person typing `y` at this prompt says yes. No command option or environment variable says yes, and no file inside the project counts as a yes. When the install runs without a terminal (a pipe, CI or an agent) it does not ask and sends nothing. `olp-hook setup` asks the same question for a project you set up by hand, and is also how you turn it back on later. Only people who say yes send anything.
 
 If you say yes, your answer and a random id are stored outside the project, in `<home>/olp/usage/` (one file per project folder, named by a hash of the folder path), and one `SessionStart` entry, `olp-hook signal --session-start`, is added to `.claude/settings.json`. When a new Claude Code session starts, it sends at most once a UTC day (00:00 UTC) these fields and nothing else:
 
@@ -206,7 +218,7 @@ If you say yes, your answer and a random id are stored outside the project, in `
 
 The counts cover what the hook recorded since the last send, up to 10 minutes before this send (so a decision card's 10 minutes are over before it is counted). Each count stops at 10000. No commands, paths, file or folder names, amounts or answer text are sent. The server does not store your IP address or the raw `install_id`. Server totals are by the day they were received; one daily send can cover several days since the last send.
 
-It is sent only to the `https://` address in the bundled settings file, with no redirects, your own curl config file ignored, and a 2-second limit. A project's `.olp/hook-config.json` can only turn it off (`"signal_endpoint": ""`); it cannot change the address. A failed send is not retried that day, prints nothing and never changes what the hook decides. The hook itself (PreToolUse/PostToolUse) never sends it.
+It is sent only to the `https://` address in the bundled settings file, with no redirects, your own curl config file ignored, and a 2-second limit at session start (5 seconds when you run `olp-hook signal` yourself, which then says what happened: sent, no answer in time — it may still have arrived — or not sent). A project's `.olp/hook-config.json` can only turn it off (`"signal_endpoint": ""`); it cannot change the address. A failed send is not retried that day, prints nothing and never changes what the hook decides. The hook itself (PreToolUse/PostToolUse) never sends it.
 
 Turn it off at any time with `npx @feedpia/olp telemetry off` (removes the `SessionStart` entry and your id). `OLP_HOOK_SIGNAL=off` also stops it and always wins.
 
@@ -230,7 +242,7 @@ Remove the `olp-hook` lines from your Claude Code settings (`olp-hook uninstall`
 - **Every shell command is blocked with a hook error:** Claude Code could not run `olp-hook` (missing, broken, or too slow), and `"onFailure": "block"` makes it block the call on purpose. Check that the `command` path in `.claude/settings.json` points to an `olp-hook` file that exists (by default in the `olp` folder in your home folder; `olp-hook.exe` on Windows).
 - To turn it off now, remove the `hooks` entry this guide added from the project's `.claude/settings.json`. It stops in that project right away.
 
-## Known limitations (0.1.0)
+## Known limitations (0.1.1)
 
 - OLP still asks before commands it doesn't recognize yet, even read-only ones. We add more with every release.
 - On slow machines, PowerShell commands may trigger more prompts. Delete and overwrite cards still appear as before.
