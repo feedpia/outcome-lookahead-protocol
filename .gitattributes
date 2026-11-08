@@ -1,2 +1,2 @@
-# olp-hook 이 실행 파일 안에 박는 자료(include_str!) — 화면 틀 sha 를 시험이 잠근다. Windows 체크아웃의 CRLF 변환을 막는다.
+# Data that olp-hook embeds in its binary (include_str!) — tests lock the template sha. Stop CRLF conversion on Windows checkouts.
 tools/olp-hook/data/* -text

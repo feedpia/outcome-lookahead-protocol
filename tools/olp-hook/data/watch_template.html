@@ -8,7 +8,7 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:">
 <title>OLP watch</title>
 <style>
-/* 스크립트 0·외부 자원 0. 값은 엔진이 중괄호 두 겹 자리에 박아 쓰고, 보이고 숨는 것은 body 클래스(상태·종류·개수·되돌림)로만 정한다. 새로 고침(1초)마다 모양이 흔들리지 않게 움직임은 점 하나뿐. */
+/* No scripts, no external resources. The engine writes values into the double-brace slots; what shows or hides is set only by body classes (state, kind, count, undo). Only one dot moves, so the layout does not shake on each 1 s refresh. */
 :root{--bg:#f6f7f9;--panel:#ffffff;--ink:#0f172a;--sub:#475569;--tile:#e9edf3;--glyph:#8896ab;--glyph2:#d3dae6;--accent:#ffb020;--on-accent:#0b0f17;
  --mono:ui-monospace,"Cascadia Mono","SF Mono",Menlo,Consolas,monospace;
  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR","Noto Sans",system-ui,sans-serif}
@@ -16,10 +16,10 @@
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
 body{margin:0;background:var(--bg);color:var(--ink);font:400 1rem/1.55 var(--sans)}
-/* 한·영: lang 하나로 고른다 */
+/* Korean/English: chosen by lang alone */
 html[lang="ko"] .en{display:none !important}
 html:not([lang="ko"]) .ko{display:none !important}
-/* 상태·종류·단위별 보이기: 기본 숨김 → 맞는 body 클래스일 때만 */
+/* Show by state, kind and unit: hidden by default → shown only with the matching body class */
 .w,.kw,.uw,.cw,.nw,.dw{display:none}
 .kw-other{display:revert}
 body.s-waiting .w-waiting,body.s-ran .w-ran,body.s-not_run .w-not_run,body.s-blocked .w-blocked,body.s-none .w-none{display:revert}
@@ -45,7 +45,7 @@ body.s-waiting .chips.w-waiting{display:flex}
 @media (min-width:900px){.grid{grid-template-columns:minmax(0,1.5fr) minmax(0,1fr)}}
 h2{margin:0 0 10px;font-size:1.125rem;line-height:1.3;letter-spacing:-.01em;font-weight:800}
 .field{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,210px),1fr));gap:8px;margin:0;padding:0;list-style:none}
-.field .tile:nth-child(n+7){display:none} /* 한 화면에 들어가게(1280x800 에서 스크롤 0): 7번째부터는 안 그림. 엔진은 6줄까지만 넘기고 나머지는 files_more_n 로 */
+.field .tile:nth-child(n+7){display:none} /* Fit one screen (no scroll at 1280x800): nothing from the 7th tile on is drawn. The engine passes at most 6 rows and the rest as files_more_n */
 .tile{display:flex;gap:12px;align-items:flex-start;background:var(--tile);padding:12px 14px;min-width:0}
 .g{flex:none;width:28px;height:36px}
 .g .a{fill:var(--glyph)}.g .b{fill:var(--glyph2)}

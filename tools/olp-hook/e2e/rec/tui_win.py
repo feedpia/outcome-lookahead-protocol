@@ -30,7 +30,7 @@ def flat(s):
 
 
 class Run:
-    """읽기는 뒤 실(thread)에서만 — p.read 는 화면이 멈추면 끝없이 기다리므로(11-07 실행 42355938531 30분 막힘) 앞쪽은 큐만 봄."""
+    """Reads happen only on a background thread — p.read waits forever when the screen stops, so the front side only watches the queue."""
     def __init__(self):
         import queue, threading
         env = dict(os.environ)

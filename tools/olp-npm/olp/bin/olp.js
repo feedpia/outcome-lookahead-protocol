@@ -5,7 +5,7 @@
 'use strict';
 const path = require('node:path');
 
-/** `<process.platform>-<process.arch>` → 패키지 이름. 여기 없는 조합 = 아직 판 없음. */
+/** `<process.platform>-<process.arch>` → package name. A combination not listed here = no build yet. */
 const PLATFORMS = {
   'win32-x64': '@feedpia/olp-win32-x64',
   'darwin-arm64': '@feedpia/olp-darwin-arm64',
@@ -15,7 +15,7 @@ const PLATFORMS = {
 };
 
 /**
- * 무엇을 부를지 정함(실행은 하지 않음). resolve(spec) = 그 패키지의 package.json 경로 또는 null.
+ * Decides what to run (does not run it). resolve(spec) = path to that package's package.json, or null.
  * @returns {{file?: string, args?: string[], error?: string}}
  */
 function plan(platform, arch, args, resolve) {

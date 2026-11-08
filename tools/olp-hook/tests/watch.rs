@@ -461,8 +461,8 @@ fn sha256_hex(data: &[u8]) -> String {
 fn template_slots_match_contract() {
     assert_eq!(sha256_hex(b"abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", "sanity check of the sha implementation");
     let h = sha256_hex(watch::TEMPLATE.as_bytes());
-    // The wording for the unreadable kind was changed from the old text to "git info missing" (values and slots unchanged); the old sha12 was 0c28d7bfe4d2.
-    assert!(h.starts_with("1aa442c59e2f"), "template sha12 is pinned: {h}");
+    // CSS comments translated to English (values, slots and visible text unchanged); the previous sha12 was 1aa442c59e2f (before that 0c28d7bfe4d2).
+    assert!(h.starts_with("949f2ab087d7"), "template sha12 is pinned: {h}");
     let mut found = BTreeSet::new();
     let mut rest = watch::TEMPLATE;
     while let Some(i) = rest.find("{{") {
