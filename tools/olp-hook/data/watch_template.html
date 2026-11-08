@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="{{lang}}">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="1">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:">
+<title>OLP watch</title>
+<style>
+/* 스크립트 0·외부 자원 0. 값은 엔진이 중괄호 두 겹 자리에 박아 쓰고, 보이고 숨는 것은 body 클래스(상태·종류·개수·되돌림)로만 정한다. 새로 고침(1초)마다 모양이 흔들리지 않게 움직임은 점 하나뿐. */
+:root{--bg:#f6f7f9;--panel:#ffffff;--ink:#0f172a;--sub:#475569;--tile:#e9edf3;--glyph:#8896ab;--glyph2:#d3dae6;--accent:#ffb020;--on-accent:#0b0f17;
+ --mono:ui-monospace,"Cascadia Mono","SF Mono",Menlo,Consolas,monospace;
+ --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR","Noto Sans",system-ui,sans-serif}
+@media (prefers-color-scheme: dark){:root{--bg:#08090c;--panel:#111419;--ink:#f4f6fa;--sub:#a9b6cc;--tile:#1b2029;--glyph:#5d6b82;--glyph2:#232a36}}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:400 1rem/1.55 var(--sans)}
+/* 한·영: lang 하나로 고른다 */
+html[lang="ko"] .en{display:none !important}
+html:not([lang="ko"]) .ko{display:none !important}
+/* 상태·종류·단위별 보이기: 기본 숨김 → 맞는 body 클래스일 때만 */
+.w,.kw,.uw,.cw,.nw,.dw{display:none}
+.kw-other{display:revert}
+body.s-waiting .w-waiting,body.s-ran .w-ran,body.s-not_run .w-not_run,body.s-blocked .w-blocked,body.s-none .w-none{display:revert}
+body.k-file_delete .kw-file_delete,body.k-file_overwrite .kw-file_overwrite,body.k-git_force_push .kw-git_force_push,body.k-git_reset_hard .kw-git_reset_hard,body.k-db_delete .kw-db_delete,body.k-db_update .kw-db_update{display:revert}
+body.k-file_delete .kw-other,body.k-file_overwrite .kw-other,body.k-git_force_push .kw-other,body.k-git_reset_hard .kw-other,body.k-db_delete .kw-other,body.k-db_update .kw-other{display:none}
+body.un-file .uw-file,body.un-commit .uw-commit,body.un-change .uw-change,body.un-row .uw-row{display:revert}
+body.c-counted .cw-counted,body.c-not_checked .cw-not_checked,body.c-user_declared .cw-user_declared{display:revert}
+body.u-not_confirmed .dw-not_confirmed,body.u-declared .dw-declared{display:revert}
+.wrap{max-width:1120px;margin:0 auto;padding:16px clamp(14px,3.5vw,36px) 28px}
+.top{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;padding-bottom:18px}
+.brand{font:700 1rem var(--mono);letter-spacing:-.01em}
+.upd{color:var(--sub);font-size:.9375rem}
+h1{margin:0;font-size:clamp(1.625rem,3.4vw + .6rem,2.75rem);line-height:1.15;letter-spacing:-.03em;font-weight:800;overflow-wrap:anywhere}
+.fact{margin:12px 0 0;font-size:clamp(1.125rem,1.4vw + .8rem,1.5rem);font-weight:700;overflow-wrap:anywhere}
+.hl{background:var(--accent);color:var(--on-accent);padding:1px 8px;font-weight:800}
+.lead{margin:10px 0 0;color:var(--sub);max-width:46em}
+.chips{flex-wrap:wrap;gap:8px;margin-top:16px}
+body.s-waiting .chips.w-waiting{display:flex}
+.chip{display:inline-flex;align-items:center;gap:10px;min-height:44px;padding:0 16px;font-weight:700;background:var(--accent);color:var(--on-accent)}
+.dot{width:10px;height:10px;border-radius:50%;background:currentColor;flex:none;animation:pulse 2s ease-in-out infinite}
+@keyframes pulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(.55);opacity:.5}}
+.grid{display:grid;grid-template-columns:1fr;gap:28px;margin-top:28px;align-items:start}
+@media (min-width:900px){.grid{grid-template-columns:minmax(0,1.5fr) minmax(0,1fr)}}
+h2{margin:0 0 10px;font-size:1.125rem;line-height:1.3;letter-spacing:-.01em;font-weight:800}
+.field{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,210px),1fr));gap:8px;margin:0;padding:0;list-style:none}
+.field .tile:nth-child(n+7){display:none} /* 한 화면에 들어가게(1280x800 에서 스크롤 0): 7번째부터는 안 그림. 엔진은 6줄까지만 넘기고 나머지는 files_more_n 로 */
+.tile{display:flex;gap:12px;align-items:flex-start;background:var(--tile);padding:12px 14px;min-width:0}
+.g{flex:none;width:28px;height:36px}
+.g .a{fill:var(--glyph)}.g .b{fill:var(--glyph2)}
+.t{min-width:0;flex:1}
+.name{font:500 .875rem/1.4 var(--mono);overflow-wrap:anywhere;word-break:break-word}
+.nat{margin-top:6px;font-size:.875rem;display:flex;align-items:center;gap:6px}
+.nat i{display:inline-block;width:10px;height:10px;background:var(--ink);flex:none}
+.n-ignored .nat i{clip-path:polygon(50% 0,100% 100%,0 100%)}
+.n-recent .nat i{border-radius:50%}
+.n-untracked .nat i{transform:rotate(45deg) scale(.85)}
+.n-unreadable .nat i{background:transparent;outline:2px solid var(--ink);outline-offset:-2px}
+.nw{display:none}
+.n-tracked .nw-tracked,.n-ignored .nw-ignored,.n-recent .nw-recent,.n-untracked .nw-untracked,.n-unreadable .nw-unreadable{display:revert}
+[data-n="1"] .pl{display:none}
+.more{margin:10px 0 0;font-weight:700}
+.more[data-n=""],.more[data-n="0"]{display:none}
+.none{display:none;margin:0;color:var(--sub)}
+.field:empty + .none{display:block}
+body.s-none .files{display:none}
+dl{margin:0;display:grid;gap:8px}
+dl>div{background:var(--panel);padding:12px 16px;display:grid;gap:2px}
+dt{color:var(--sub);font-size:.875rem;font-weight:600}
+dd{margin:0;font-size:1rem;font-weight:600}
+.week{margin-top:22px}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.stat{background:var(--panel);padding:10px 12px}
+.stat b{display:block;font:800 1.75rem/1.1 var(--sans);font-variant-numeric:tabular-nums}
+.stat span{font-size:.875rem;color:var(--sub)}
+.wk{margin:8px 0 0;color:var(--sub);font-size:.9375rem}
+.wk b{color:var(--ink);font-variant-numeric:tabular-nums}
+.foot{margin:26px 0 0;color:var(--sub);font-size:.875rem;max-width:56em}
+@media (max-width:420px){.stats{grid-template-columns:repeat(2,1fr)}}
+@media (prefers-reduced-motion: reduce){.dot{animation:none}}
+</style>
+</head>
+<body class="s-{{card.state}} k-{{card.kind}} c-{{card.count_state}} u-{{card.undo}} un-{{card.count_unit}}">
+<div class="wrap">
+  <header class="top">
+    <div class="brand">OLP watch</div>
+    <div class="upd"><span class="en">updated {{updated_ago_s}} s ago</span><span class="ko">{{updated_ago_s}}초 전에 갱신</span></div>
+  </header>
+  <main>
+    <h1>
+      <span class="w w-waiting"><span class="en">Before it runs</span><span class="ko">실행 전입니다</span></span>
+      <span class="w w-ran"><span class="en">It ran</span><span class="ko">실행됐습니다</span></span>
+      <span class="w w-not_run"><span class="en">It did not run</span><span class="ko">실행되지 않았습니다</span></span>
+      <span class="w w-blocked"><span class="en">Blocked before it ran</span><span class="ko">실행 전에 막혔습니다</span></span>
+      <span class="w w-none"><span class="en">No card yet</span><span class="ko">아직 카드가 없습니다</span></span>
+    </h1>
+    <p class="fact w w-waiting w-ran w-not_run w-blocked">
+      <span class="kw kw-file_delete"><span class="en">Delete files</span><span class="ko">파일 지우기</span></span>
+      <span class="kw kw-file_overwrite"><span class="en">Overwrite files</span><span class="ko">파일 덮어쓰기</span></span>
+      <span class="kw kw-git_force_push"><span class="en">git force push</span><span class="ko">git 강제 푸시</span></span>
+      <span class="kw kw-git_reset_hard"><span class="en">git reset --hard</span><span class="ko">git reset --hard</span></span>
+      <span class="kw kw-db_delete"><span class="en">Delete database rows</span><span class="ko">데이터베이스 행 지우기</span></span>
+      <span class="kw kw-db_update"><span class="en">Change database rows</span><span class="ko">데이터베이스 행 바꾸기</span></span>
+      <span class="kw kw-other"><span class="en">Write action</span><span class="ko">쓰기 작업</span></span>
+      —
+      <span class="cw cw-counted"><span class="hl" data-n="{{card.count_n}}">
+        <span class="uw uw-file"><span class="en">{{card.count_n}} file<span class="pl">s</span></span><span class="ko">파일 {{card.count_n}}개</span></span>
+        <span class="uw uw-commit"><span class="en">{{card.count_n}} commit<span class="pl">s</span></span><span class="ko">커밋 {{card.count_n}}개</span></span>
+        <span class="uw uw-change"><span class="en">{{card.count_n}} change<span class="pl">s</span></span><span class="ko">변경 {{card.count_n}}개</span></span>
+        <span class="uw uw-row"><span class="en">{{card.count_n}} row<span class="pl">s</span></span><span class="ko">행 {{card.count_n}}개</span></span>
+      </span></span>
+      <span class="cw cw-user_declared"><span class="hl" data-n="{{card.count_n}}">
+        <span class="uw uw-file"><span class="en">{{card.count_n}} file<span class="pl">s</span></span><span class="ko">파일 {{card.count_n}}개</span></span>
+        <span class="uw uw-commit"><span class="en">{{card.count_n}} commit<span class="pl">s</span></span><span class="ko">커밋 {{card.count_n}}개</span></span>
+        <span class="uw uw-change"><span class="en">{{card.count_n}} change<span class="pl">s</span></span><span class="ko">변경 {{card.count_n}}개</span></span>
+        <span class="uw uw-row"><span class="en">{{card.count_n}} row<span class="pl">s</span></span><span class="ko">행 {{card.count_n}}개</span></span>
+      </span> <span class="en">(declared, not checked)</span><span class="ko">(직접 적은 값, 확인 안 함)</span></span>
+      <span class="cw cw-not_checked"><span class="hl"><span class="en">count not checked</span><span class="ko">개수를 세지 못했습니다</span></span></span>
+    </p>
+    <p class="lead">
+      <span class="w w-waiting"><span class="en">Choose in the confirmation prompt in your terminal. This page is view-only and never runs the command for you.</span><span class="ko">터미널의 확인 창에서 고르세요. 이 화면은 보기만 하고, 명령을 대신 실행하지 않습니다.</span></span>
+      <span class="w w-ran"><span class="en">The command you allowed ran. The numbers are the ones counted before it ran.</span><span class="ko">허락한 명령이 실행됐습니다. 숫자는 실행 전에 센 값입니다.</span></span>
+      <span class="w w-not_run"><span class="en">No run was recorded after this card. You may have declined, or the prompt may still be open.</span><span class="ko">이 카드 뒤에 실행 기록이 없습니다. 거절하셨거나, 확인 창이 아직 열려 있을 수 있습니다.</span></span>
+      <span class="w w-blocked"><span class="en">The hook blocked it before it ran. The numbers are the ones counted before the block.</span><span class="ko">훅이 실행 전에 막았습니다. 숫자는 막기 전에 센 값입니다.</span></span>
+      <span class="w w-none"><span class="en">When the agent is about to write something, its card appears here.</span><span class="ko">에이전트가 쓰기 작업을 하려 하면 이 자리에 카드가 뜹니다.</span></span>
+    </p>
+    <div class="chips w w-waiting">
+      <span class="chip"><span class="dot" style="animation-delay:-{{card.waiting_s}}s"></span><span class="en">Waiting for your answer · {{card.waiting_s}} s</span><span class="ko">대답 기다리는 중 · {{card.waiting_s}}초</span></span>
+    </div>
+
+    <div class="grid">
+      <section class="files" aria-labelledby="h-files">
+        <h2 id="h-files"><span class="en">Files on the card</span><span class="ko">카드에 올라온 파일</span></h2>
+        <ul class="field">
+<!--FILE_ROW_BEGIN--><li class="tile n-{{files[].nature}}"><svg class="g" viewBox="0 0 28 36" aria-hidden="true" focusable="false"><path class="a" d="M0 0h18l10 10v26H0z"/><path class="b" d="M18 0v10h10z"/></svg><div class="t"><div class="name">{{files[].name}}</div><div class="nat"><i></i>
+<span class="nw nw-tracked"><span class="en">git original</span><span class="ko">git 원본</span></span>
+<span class="nw nw-ignored"><span class="en">build output (git-ignored)</span><span class="ko">빌드 결과물(git 무시)</span></span>
+<span class="nw nw-recent"><span class="en">recently edited</span><span class="ko">최근 수정</span></span>
+<span class="nw nw-untracked"><span class="en">not in git</span><span class="ko">git에 없음</span></span>
+<span class="nw nw-unreadable"><span class="en">no git info</span><span class="ko">git 정보 없음</span></span>
+</div></div></li><!--FILE_ROW_END-->
+        </ul>
+        <p class="none"><span class="en">No file names on this card.</span><span class="ko">이 카드에는 파일 이름이 없습니다.</span></p>
+        <p class="more" data-n="{{files_more_n}}"><span class="en">and {{files_more_n}} more</span><span class="ko">외 {{files_more_n}}개 더</span></p>
+      </section>
+      <div>
+        <section class="w w-waiting w-ran w-not_run w-blocked" aria-labelledby="h-card">
+          <h2 id="h-card"><span class="en">Card</span><span class="ko">카드</span></h2>
+          <dl>
+            <div><dt><span class="en">Count</span><span class="ko">개수</span></dt><dd>
+              <span class="cw cw-counted"><span class="en">counted on this device, read-only</span><span class="ko">이 기기에서 읽기만 해서 셈</span></span>
+              <span class="cw cw-not_checked"><span class="en">not checked</span><span class="ko">확인 못 함</span></span>
+              <span class="cw cw-user_declared"><span class="en">declared by you, not checked</span><span class="ko">직접 적은 값, 확인 안 함</span></span>
+            </dd></div>
+            <div><dt><span class="en">Undo</span><span class="ko">되돌림</span></dt><dd>
+              <span class="dw dw-not_confirmed"><span class="hl"><span class="en">not confirmed</span><span class="ko">확인 못 함</span></span></span>
+              <span class="dw dw-declared"><span class="en">recovery location declared (not checked)</span><span class="ko">복구 위치 선언됨(확인 안 함)</span></span>
+            </dd></div>
+          </dl>
+        </section>
+        <section class="week" aria-labelledby="h-week">
+          <h2 id="h-week"><span class="en">This week</span><span class="ko">이번 주</span></h2>
+          <div class="stats">
+            <div class="stat"><b>{{week.cards}}</b><span class="en">cards</span><span class="ko">카드</span></div>
+            <div class="stat"><b>{{week.ran}}</b><span class="en">ran</span><span class="ko">실행됨</span></div>
+            <div class="stat"><b>{{week.not_run}}</b><span class="en">not run</span><span class="ko">실행 안 됨</span></div>
+            <div class="stat"><b>{{week.blocked}}</b><span class="en">blocked</span><span class="ko">막힘</span></div>
+          </div>
+          <p class="wk"><span class="en">Files on cards: ran <b>{{week.files_ran}}</b> · not run <b>{{week.files_not_run}}</b> · blocked <b>{{week.files_blocked}}</b> · cards with an uncounted part <b>{{week.not_counted}}</b></span><span class="ko">카드에 올라온 파일: 실행됨 <b>{{week.files_ran}}</b> · 실행 안 됨 <b>{{week.files_not_run}}</b> · 막힘 <b>{{week.files_blocked}}</b> · 못 센 부분이 있는 카드 <b>{{week.not_counted}}</b></span></p>
+        </section>
+      </div>
+    </div>
+  </main>
+  <p class="foot"><span class="en">Read-only. Counted on this device; nothing is sent anywhere. This page reloads every second — if the numbers look old, check “updated … s ago”.</span><span class="ko">읽기 전용입니다. 이 기기에서 센 값이며 어디로도 보내지 않습니다. 이 화면은 1초마다 다시 불러옵니다. 숫자가 오래돼 보이면 맨 위 «갱신 … 초 전»을 보세요.</span></p>
+</div>
+</body>
+</html>

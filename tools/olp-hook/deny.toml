@@ -1,0 +1,10 @@
+# cargo-deny settings. Only the permissive licenses listed below are allowed; anything else is rejected.
+# Run: cargo deny check licenses advisories  (from this folder)
+
+[licenses]
+allow = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "PostgreSQL", "Unicode-3.0"]
+confidence-threshold = 0.9
+
+[advisories]
+# Known vulnerabilities (RustSec): nothing is ignored.
+ignore = []

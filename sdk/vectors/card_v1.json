@@ -1,0 +1,374 @@
+{
+  "vectors": "card_v1",
+  "note": "Hand-written expected card text (not hook output). Same input -> same card on every path, except PowerShell cases with \"expect_windows\": on Windows the hook also reads the command with PowerShell's own parser (expect_windows); where that parser is not used (macOS, Linux, OLP_HOOK_PS_PARSER=off) the card is \"expect\". Now checked by tools/olp-hook (hook and npx run the same binary); MCP check, CLI and SDKs join after launch. Decisions of 2026-11-01 (amount = check it in the tool input; no GUI key on the card; nothing risky = no card text).",
+  "header": "OLP hook: check before it runs — before engine check · no receipt",
+  "marker": "before engine check · no receipt",
+  "cases": [
+    {
+      "name": "delete_five_files_names_capped",
+      "files": ["build/a.txt", "build/b.txt", "build/c.log", "build/d.md", "build/e.txt"],
+      "tool": "Bash", "input": {"command": "rm -rf build"},
+      "expect": {
+        "decision": "ask",
+        "reason": "[OLP] Before this runs: delete files — 5 files (preview: counted on this device, read-only) | Files: build/a.txt, build/b.txt, build/c.log and 2 more | before engine check · no receipt",
+        "message": [
+          "OLP hook: check before it runs — before engine check · no receipt",
+          "What it does: delete files — 5 files (preview: counted on this device, read-only)",
+          "Files: build/a.txt, build/b.txt, build/c.log and 2 more",
+          "Undo: not confirmed — no recovery location declared",
+          "Why: WRITE_IRREVERSIBLE, WRITE_RECOVERY_UNKNOWN"
+        ]
+      }
+    },
+    {
+      "name": "delete_three_files_all_named",
+      "files": ["build/a.txt", "build/b.txt", "build/c.log"],
+      "tool": "Bash", "input": {"command": "rm -rf build"},
+      "expect": {
+        "decision": "ask",
+        "reason": "[OLP] Before this runs: delete files — 3 files (preview: counted on this device, read-only) | Files: build/a.txt, build/b.txt, build/c.log | before engine check · no receipt",
+        "message": [
+          "OLP hook: check before it runs — before engine check · no receipt",
+          "What it does: delete files — 3 files (preview: counted on this device, read-only)",
+          "Files: build/a.txt, build/b.txt, build/c.log",
+          "Undo: not confirmed — no recovery location declared",
+          "Why: WRITE_IRREVERSIBLE, WRITE_RECOVERY_UNKNOWN"
+        ]
+      }
+    },
+    {
+      "name": "payment_tool_amount_line",
+      "classify": [["--tool", "mcp__tosspayments__confirm_payment", "moves_money"]],
+      "tool": "mcp__tosspayments__confirm_payment", "input": {"amount": 99000},
+      "expect": {
+        "decision": "ask",
+        "reason": "[OLP] Before this runs: moves money (classified by you) — count not checked | Amount: check it in the tool input before you answer (the hook does not read amounts) | before engine check · no receipt",
+        "message": [
+          "OLP hook: check before it runs — before engine check · no receipt",
+          "What it does: moves money (classified by you) — count not checked",
+          "Amount: check it in the tool input before you answer (the hook does not read amounts)",
+          "Undo: not confirmed — no recovery location declared",
+          "Why: WRITE_IRREVERSIBLE, WRITE_RECOVERY_UNKNOWN"
+        ]
+      }
+    },
+    {
+      "name": "database_rows_not_counted",
+      "tool": "Bash", "input": {"command": "psql -c \"DELETE FROM orders WHERE id = 1\""},
+      "expect": {
+        "decision": "ask",
+        "reason": "[OLP] Before this runs: delete database rows — count not checked (database rows are not counted by the guard) | before engine check · no receipt",
+        "message": [
+          "OLP hook: check before it runs — before engine check · no receipt",
+          "What it does: delete database rows — count not checked (database rows are not counted by the guard)",
+          "Undo: not confirmed — no recovery location declared",
+          "Why: WRITE_IRREVERSIBLE, WRITE_RECOVERY_UNKNOWN, WRITE_COUNT_UNKNOWN"
+        ]
+      }
+    },
+    {
+      "name": "read_only_no_card",
+      "tool": "Bash", "input": {"command": "ls"},
+      "expect": {"decision": null, "reason": null, "message": null}
+    },
+    {
+      "name": "auto_mode_card_in_permission_prompt",
+      "mode": "auto",
+      "files": ["build/a.txt", "build/b.txt", "build/c.log"],
+      "tool": "Bash", "input": {"command": "rm -rf build"},
+      "expect": {
+        "decision": "ask",
+        "reason": "[OLP] Before this runs: delete files — 3 files (preview: counted on this device, read-only) | Files: build/a.txt, build/b.txt, build/c.log | before engine check · no receipt",
+        "message": [
+          "OLP hook: check before it runs — before engine check · no receipt",
+          "What it does: delete files — 3 files (preview: counted on this device, read-only)",
+          "Files: build/a.txt, build/b.txt, build/c.log",
+          "Undo: not confirmed — no recovery location declared",
+          "Why: WRITE_IRREVERSIBLE, WRITE_RECOVERY_UNKNOWN"
+        ]
+      }
+    },
+    {
+      "name": "powershell_remove_item_counted",
+      "files": ["build/a.txt", "build/b.txt", "build/c.log"],
+      "tool": "PowerShell", "input": {"command": "Remove-Item -LiteralPath .\\build -Recurse -Force -Confirm:$false; Test-Path .\\build"},
+      "expect": {
+        "decision": "ask",
+        "reason": "[OLP] Before this runs: delete files — 3 files (preview: counted on this device, read-only) | Files: build/a.txt, build/b.txt, build/c.log | before engine check · no receipt",
+        "message": [
+          "OLP hook: check before it runs — before engine check · no receipt",
+          "What it does: delete files — 3 files (preview: counted on this device, read-only)",
+          "Files: build/a.txt, build/b.txt, build/c.log",
+          "Undo: not confirmed — no recovery location declared",
+          "Why: WRITE_IRREVERSIBLE, WRITE_RECOVERY_UNKNOWN"
+        ]
+      }
+    },
+    {
+      "name": "powershell_wildcard_not_counted",
+      "files": ["build/a.txt", "build/b.txt", "build/c.log"],
+      "tool": "PowerShell", "input": {"command": "Remove-Item .\\build\\*.txt"},
+      "expect": {
+        "decision": "ask",
+        "reason": "[OLP] Before this runs: delete files — count not checked (the paths use patterns or variables) | before engine check · no receipt",
+        "message": [
+          "OLP hook: check before it runs — before engine check · no receipt",
+          "What it does: delete files — count not checked (the paths use patterns or variables)",
+          "Undo: not confirmed — no recovery location declared",
+          "Why: WRITE_IRREVERSIBLE, WRITE_RECOVERY_UNKNOWN, WRITE_COUNT_UNKNOWN"
+        ]
+      }
+    },
+    {
+      "name": "powershell_comma_array_counted",
+      "files": ["build/app.log", "build/cache.tmp", "build/notes.txt"],
+      "tool": "PowerShell", "input": {"command": "Remove-Item build/app.log, build/cache.tmp -Force; Get-ChildItem build -Name; git status --short"},
+      "expect": {
+        "decision": "ask",
+        "reason": "[OLP] Before this runs: delete files — 2 files (preview: counted on this device, read-only) | Files: build/app.log, build/cache.tmp | before engine check · no receipt",
+        "message": [
+          "OLP hook: check before it runs — before engine check · no receipt",
+          "What it does: delete files — 2 files (preview: counted on this device, read-only)",
+          "Files: build/app.log, build/cache.tmp",
+          "Undo: not confirmed — no recovery location declared",
+          "Why: WRITE_IRREVERSIBLE, WRITE_RECOVERY_UNKNOWN"
+        ]
+      }
+    },
+    {
+      "name": "powershell_cd_to_the_same_project_still_counted",
+      "files": ["build/app.log", "build/cache.tmp", "build/notes.txt"],
+      "tool": "PowerShell", "input": {"command": "cd {project}; Remove-Item build\\app.log, build\\cache.tmp -Force; Get-ChildItem build -Name"},
+      "expect": {
+        "decision": "ask",
+        "reason": "[OLP] Before this runs: delete files — 2 files (preview: counted on this device, read-only) | Files: build/app.log, build/cache.tmp | before engine check · no receipt",
+        "message": [
+          "OLP hook: check before it runs — before engine check · no receipt",
+          "What it does: delete files — 2 files (preview: counted on this device, read-only)",
+          "Files: build/app.log, build/cache.tmp",
+          "Undo: not confirmed — no recovery location declared",
+          "Why: WRITE_IRREVERSIBLE, WRITE_RECOVERY_UNKNOWN"
+        ]
+      }
+    },
+    {
+      "name": "powershell_script_block_read_classify_names_only",
+      "files": ["build/app.log"],
+      "tool": "PowerShell", "input": {"command": "Get-ChildItem -Directory -Recurse -Depth 2 -Filter build -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch 'node_modules' } | ForEach-Object { $s=(Get-ChildItem $_.FullName -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum); \"{0}  files={1}  MB={2:N1}\" -f $_.FullName,$s.Count,($s.Sum/1MB) }; git status --short | Select-Object -First 10; git check-ignore build"},
+      "expect": {
+        "decision": "ask",
+        "reason": "[OLP] before engine check · no receipt",
+        "message": [
+          "OLP hook: check before it runs — before engine check · no receipt",
+          "Not classified yet for this project, so it is treated as a write.",
+          "Not recognized: Where-Object, ForEach-Object"
+        ]
+      },
+      "expect_windows": {"decision": null, "reason": null, "message": null}
+    },
+    {
+      "name": "powershell_pipe_not_counted",
+      "files": ["build/a.txt", "build/b.txt", "build/c.log"],
+      "tool": "PowerShell", "input": {"command": "Get-ChildItem .\\build | Remove-Item -Recurse"},
+      "expect": {
+        "decision": "ask",
+        "reason": "[OLP] Before this runs: delete files — count not checked (this form is not counted) | before engine check · no receipt",
+        "message": [
+          "OLP hook: check before it runs — before engine check · no receipt",
+          "What it does: delete files — count not checked (this form is not counted)",
+          "Undo: not confirmed — no recovery location declared",
+          "Why: WRITE_IRREVERSIBLE, WRITE_RECOVERY_UNKNOWN, WRITE_COUNT_UNKNOWN"
+        ]
+      }
+    },
+    {
+      "name": "powershell_read_no_card",
+      "files": ["build/a.txt"],
+      "tool": "PowerShell", "input": {"command": "Get-ChildItem -Force -Directory | Select-Object Name; Test-Path .\\build; Get-ChildItem .\\build -Recurse -Force | Measure-Object"},
+      "expect": {"decision": null, "reason": null, "message": null}
+    },
+    {
+      "name": "powershell_if_block_read_no_card",
+      "files": ["build/a.txt"],
+      "tool": "PowerShell", "input": {"command": "Get-ChildItem -Directory -Recurse -Depth 2 -Filter build -ErrorAction SilentlyContinue | Select-Object FullName; git status --short | Select-Object -First 20; if (Test-Path build) { (Get-ChildItem build -Recurse -File | Measure-Object -Property Length -Sum) | Select-Object Count, Sum; git ls-files build | Select-Object -First 5; git check-ignore build }"},
+      "expect": {"decision": null, "reason": null, "message": null}
+    },
+    {
+      "name": "powershell_string_line_read_no_card",
+      "files": ["build/a.txt"],
+      "tool": "PowerShell", "input": {"command": "Get-ChildItem -Directory -Force | Select-Object Name; if (Test-Path build) { \"--- build ---\"; Get-ChildItem build -Force | Select-Object -First 20 Name; (Get-ChildItem build -Recurse -File -Force | Measure-Object -Property Length -Sum) | Select-Object Count,Sum; git status --short --ignored build | Select-Object -First 5; git ls-files build | Select-Object -First 5 }"},
+      "expect": {"decision": null, "reason": null, "message": null}
+    },
+    {
+      "name": "powershell_block_read_field_command_m27_05",
+      "files": ["build/app.log"],
+      "tool": "PowerShell", "input": {"command": "Get-ChildItem -Directory -Recurse -Depth 3 -Filter build -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch 'node_modules' } | ForEach-Object { $s = (Get-ChildItem $_.FullName -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum); \"{0} | files={1} | MB={2:N1}\" -f $_.FullName, $s.Count, ($s.Sum/1MB) }; git status --short | Select-Object -First 10; git check-ignore build"},
+      "expect_windows": {"decision": null, "reason": null, "message": null},
+      "expect": {
+        "decision": "ask",
+        "reason": "[OLP] before engine check · no receipt",
+        "message": [
+          "OLP hook: check before it runs — before engine check · no receipt",
+          "Not classified yet for this project, so it is treated as a write.",
+          "Not recognized: Where-Object, ForEach-Object"
+        ]
+      }
+    },
+    {
+      "name": "powershell_block_method_delete_card",
+      "files": ["build/a.txt"],
+      "tool": "PowerShell", "input": {"command": "Get-ChildItem build | ForEach-Object { $_.Delete() }"},
+      "expect_windows": {
+        "decision": "ask",
+        "reason": "[OLP] Before this runs: delete files — count not checked (a .NET method call deletes files) | before engine check · no receipt",
+        "message": [
+          "OLP hook: check before it runs — before engine check · no receipt",
+          "What it does: delete files — count not checked (a .NET method call deletes files)",
+          "Undo: not confirmed — no recovery location declared",
+          "Why: WRITE_IRREVERSIBLE, WRITE_RECOVERY_UNKNOWN, WRITE_COUNT_UNKNOWN"
+        ]
+      },
+      "expect": {
+        "decision": "ask",
+        "reason": "[OLP] before engine check · no receipt",
+        "message": [
+          "OLP hook: check before it runs — before engine check · no receipt",
+          "Not classified yet for this project, so it is treated as a write.",
+          "Not recognized: ForEach-Object"
+        ]
+      }
+    },
+    {
+      "name": "powershell_using_module_asks",
+      "files": ["build/a.txt"],
+      "tool": "PowerShell", "input": {"command": "using module .\\x.psm1; Get-ChildItem build"},
+      "expect_windows": {
+        "decision": "ask",
+        "reason": "[OLP] before engine check · no receipt",
+        "message": [
+          "OLP hook: check before it runs — before engine check · no receipt",
+          "Not classified yet for this project, so it is treated as a write.",
+          "Not recognized: UsingStatement",
+          "Classify it once in your own terminal (not through the agent), then run it again:",
+          "  olp-hook classify --bash \"using module\" read_only",
+          "  (if it writes: writes_other or moves_money, add --reversible --recovery-declared only if true)"
+        ]
+      },
+      "expect": {
+        "decision": "ask",
+        "reason": "[OLP] before engine check · no receipt",
+        "message": [
+          "OLP hook: check before it runs — before engine check · no receipt",
+          "Not classified yet for this project, so it is treated as a write.",
+          "Classify it once in your own terminal (not through the agent), then run it again:",
+          "  olp-hook classify --bash \"using module\" read_only",
+          "  (if it writes: writes_other or moves_money, add --reversible --recovery-declared only if true)"
+        ]
+      }
+    },
+    {
+      "name": "powershell_type_conversion_constructor_asks",
+      "files": ["build/a.txt"],
+      "tool": "PowerShell", "input": {"command": "[System.IO.StreamWriter]'build\\a.txt'"},
+      "expect_windows": {
+        "decision": "ask",
+        "reason": "[OLP] before engine check · no receipt",
+        "message": [
+          "OLP hook: check before it runs — before engine check · no receipt",
+          "Not classified yet for this project, so it is treated as a write.",
+          "Not recognized: [System.IO.StreamWriter]"
+        ]
+      },
+      "expect": {
+        "decision": "ask",
+        "reason": "[OLP] before engine check · no receipt",
+        "message": [
+          "OLP hook: check before it runs — before engine check · no receipt",
+          "Not classified yet for this project, so it is treated as a write."
+        ]
+      }
+    },
+    {
+      "name": "powershell_foreach_process_variable_asks",
+      "files": ["build/a.txt"],
+      "tool": "PowerShell", "input": {"command": "Get-ChildItem build | ForEach-Object -Process:$sb"},
+      "expect_windows": {
+        "decision": "ask",
+        "reason": "[OLP] before engine check · no receipt",
+        "message": [
+          "OLP hook: check before it runs — before engine check · no receipt",
+          "Not classified yet for this project, so it is treated as a write.",
+          "Not recognized: ForEach-Object"
+        ]
+      },
+      "expect": {
+        "decision": "ask",
+        "reason": "[OLP] before engine check · no receipt",
+        "message": [
+          "OLP hook: check before it runs — before engine check · no receipt",
+          "Not classified yet for this project, so it is treated as a write.",
+          "Not recognized: ForEach-Object"
+        ]
+      }
+    },
+    {
+      "name": "powershell_block_unknown_call_info_line",
+      "files": ["build/a.txt"],
+      "tool": "PowerShell", "input": {"command": "Get-ChildItem build | ForEach-Object { & $cmd }"},
+      "expect_windows": {
+        "decision": "ask",
+        "reason": "[OLP] before engine check · no receipt",
+        "message": [
+          "OLP hook: check before it runs — before engine check · no receipt",
+          "Not classified yet for this project, so it is treated as a write.",
+          "Not recognized: & $cmd"
+        ]
+      },
+      "expect": {
+        "decision": "ask",
+        "reason": "[OLP] before engine check · no receipt",
+        "message": [
+          "OLP hook: check before it runs — before engine check · no receipt",
+          "Not classified yet for this project, so it is treated as a write.",
+          "Not recognized: ForEach-Object"
+        ]
+      }
+    },
+    {
+      "name": "pick_on_gui_off_hint_without_key",
+      "pick": true,
+      "files": ["build/a.txt", "build/b.txt", "build/c.log"],
+      "tool": "Bash", "input": {"command": "rm -rf build"},
+      "expect": {
+        "decision": "ask",
+        "reason": "[OLP] Before this runs: delete files — 3 files (preview: counted on this device, read-only) | Files: build/a.txt, build/b.txt, build/c.log | before engine check · no receipt",
+        "message": [
+          "OLP hook: check before it runs — before engine check · no receipt",
+          "What it does: delete files — 3 files (preview: counted on this device, read-only)",
+          "Files: build/a.txt, build/b.txt, build/c.log",
+          "To mark files Keep or Delete, run npx @feedpia/olp gui serve in another terminal",
+          "Undo: not confirmed — no recovery location declared",
+          "Why: WRITE_IRREVERSIBLE, WRITE_RECOVERY_UNKNOWN"
+        ]
+      }
+    },
+    {
+      "name": "pick_on_gui_running_answer_no_line",
+      "pick": true, "gui_alive": true,
+      "files": ["build/a.txt", "build/b.txt", "build/c.log"],
+      "tool": "Bash", "input": {"command": "rm -rf build"},
+      "expect": {
+        "decision": "ask",
+        "reason": "[OLP] Before this runs: delete files — 3 files (preview: counted on this device, read-only) | Files: build/a.txt, build/b.txt, build/c.log | before engine check · no receipt",
+        "message": [
+          "OLP hook: check before it runs — before engine check · no receipt",
+          "What it does: delete files — 3 files (preview: counted on this device, read-only)",
+          "Files: build/a.txt, build/b.txt, build/c.log",
+          "Mark Keep or Delete in the GUI window. If any file is marked Keep, answer No here; the agent's next try must leave them out.",
+          "Undo: not confirmed — no recovery location declared",
+          "Why: WRITE_IRREVERSIBLE, WRITE_RECOVERY_UNKNOWN"
+        ]
+      }
+    }
+  ]
+}

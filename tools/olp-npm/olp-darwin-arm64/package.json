@@ -1,0 +1,23 @@
+{
+  "name": "@feedpia/olp-darwin-arm64",
+  "version": "0.1.0",
+  "description": "olp-hook for macOS Apple silicon. Installed by @feedpia/olp; do not install directly.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/feedpia/outcome-lookahead-protocol.git"
+  },
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "files": [
+    "bin/"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "preferUnplugged": true
+}

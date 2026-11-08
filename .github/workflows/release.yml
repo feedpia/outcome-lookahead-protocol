@@ -1,0 +1,516 @@
+# release.yml — build, test and publish OLP 0.1.0.
+# What it does:
+#   - push to a ci/olp-* branch (practice) = build and test on 5 targets + npm pack + release archives + e2e (5 OS, 11 environment jobs) + real Claude Code (claude -p and interactive screen recording). Publishes nothing.
+#   - push of a v* tag = the above + (only when build, pack and e2e are all green) publish the 6 npm packages + a GitHub release draft.
+#   - the video and claude jobs run only when a subscription token (CLAUDE_CODE_OAUTH_TOKEN) is set, and never block publishing.
+# olp-gui is not in the 0.1.0 packages, so only olp-hook is built.
+name: release
+
+on:
+  push:
+    branches: ['ci/olp-*']
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+env:
+  RUST_TOOLCHAIN: "1.98.1"   # pinned toolchain
+  HOOK_DIR: tools/olp-hook
+  NPM_DIR: tools/olp-npm
+  # Keep Windows Python (default code page cp1252) from crashing when it prints card text (✻, —, Korean)
+  PYTHONUTF8: '1'
+  PYTHONIOENCODING: utf-8
+
+jobs:
+  build:
+    name: build ${{ matrix.key }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false   # see every job even when one fails (publishing still needs all of them green)
+      matrix:
+        include:
+          - { key: win32-x64,    os: windows-latest, target: x86_64-pc-windows-msvc,    exe: olp-hook.exe, test: true,  threads: "--test-threads=1" }
+          - { key: darwin-arm64, os: macos-latest,   target: aarch64-apple-darwin,      exe: olp-hook,     test: true,  threads: "" }
+          # cross-built on the Apple silicon runner — no x86 hardware test, build only
+          - { key: darwin-x64,   os: macos-latest,   target: x86_64-apple-darwin,       exe: olp-hook,     test: false, threads: "" }
+          - { key: linux-x64,    os: ubuntu-latest,  target: x86_64-unknown-linux-musl, exe: olp-hook,     test: true,  threads: "" }
+          # real ARM machine (2 CPUs)
+          - { key: linux-arm64,  os: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl, exe: olp-hook,   test: true,  threads: "" }
+    steps:
+      - uses: actions/checkout@v4
+      - name: toolchain
+        shell: bash
+        run: |
+          rustup toolchain install "${RUST_TOOLCHAIN}" --profile minimal --no-self-update
+          rustup default "${RUST_TOOLCHAIN}"
+          rustup target add "${{ matrix.target }}"
+      - name: musl 도구(리눅스만)
+        if: startsWith(matrix.key, 'linux-')
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      # The first powershell.exe start on Windows runners can exceed the parser's 1.5 s limit and make tests flaky.
+      # Start it a few times before the tests (CI only, no product behavior change).
+      - name: PowerShell 데우기(Windows)
+        if: matrix.key == 'win32-x64'
+        shell: bash
+        run: for i in 1 2 3; do powershell.exe -NoProfile -NonInteractive -NoLogo -Command "exit 0"; done
+      - name: cargo test
+        if: matrix.test
+        shell: bash
+        # --no-fail-fast: run every test binary (watch etc.) even after one fails; the job is still red.
+        run: cargo test --manifest-path "${HOOK_DIR}/Cargo.toml" --locked --no-fail-fast --target "${{ matrix.target }}" -- ${{ matrix.threads }}
+      - name: cargo build --release
+        shell: bash
+        run: cargo build --manifest-path "${HOOK_DIR}/Cargo.toml" --release --locked --target "${{ matrix.target }}"
+      - name: 산출물 모으기 + sha256
+        shell: bash
+        run: |
+          mkdir -p out
+          cp "${HOOK_DIR}/target/${{ matrix.target }}/release/${{ matrix.exe }}" out/
+          cd out && (sha256sum "${{ matrix.exe }}" 2>/dev/null || shasum -a 256 "${{ matrix.exe }}") > "${{ matrix.exe }}.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bin-${{ matrix.key }}
+          path: out/
+          if-no-files-found: error
+          retention-days: 7
+
+  pack:
+    name: npm pack (게시 0)
+    needs: build            # does not run unless every build job is green
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: bins
+      - name: 판 번호 대조(태그일 때 태그 = package.json 5개)
+        shell: bash
+        run: |
+          for d in olp olp-win32-x64 olp-darwin-arm64 olp-darwin-x64 olp-linux-x64 olp-linux-arm64; do
+            v=$(node -p "require('./${NPM_DIR}/$d/package.json').version"); echo "$d $v"
+            if [[ "${GITHUB_REF}" == refs/tags/v* && "v$v" != "${GITHUB_REF_NAME}" ]]; then echo "판 번호 다름: $d $v ≠ ${GITHUB_REF_NAME}"; exit 1; fi
+          done
+      - name: 실행 파일을 운영체제별 패키지 bin/ 에 넣기
+        shell: bash
+        run: |
+          for k in win32-x64 darwin-arm64 darwin-x64 linux-x64 linux-arm64; do
+            mkdir -p "${NPM_DIR}/olp-$k/bin"
+            cp bins/bin-$k/olp-hook* "${NPM_DIR}/olp-$k/bin/"
+            rm -f "${NPM_DIR}/olp-$k/bin/"*.sha256
+            chmod +x "${NPM_DIR}/olp-$k/bin/"olp-hook* || true
+          done
+      - name: npm pack 5개 + SHA256SUMS
+        shell: bash
+        run: |
+          mkdir -p dist
+          for d in olp-win32-x64 olp-darwin-arm64 olp-darwin-x64 olp-linux-x64 olp-linux-arm64 olp; do
+            (cd "${NPM_DIR}/$d" && npm pack --pack-destination "${GITHUB_WORKSPACE}/dist")
+          done
+          # Release files: 5 per-OS archives olp-hook-<os>-<arch>.zip|.tar.gz; the binary inside keeps the name olp-hook(.exe).
+          # Why: install copies only a file named «olp-hook(.exe)» next to itself. Installing from a renamed single file
+          # copies nothing yet points settings at <home>/olp/olp-hook(.exe) (exit 0), which blocks every shell command. Keeping the name inside the archive prevents that.
+          mkdir -p rel
+          pack_one() { # pack_one <bin key> <name> <exe>
+            local d="rel/stage-$2"; mkdir -p "$d"; cp "bins/bin-$1/$3" "$d/$3"; chmod +x "$d/$3"
+            cp LICENSE "$d/" 2>/dev/null || true
+            if [ "$1" = win32-x64 ]; then (cd "$d" && zip -q -X "../../dist/olp-hook-$2.zip" *); else tar -C "$d" -czf "dist/olp-hook-$2.tar.gz" .; fi
+          }
+          pack_one win32-x64    windows-x64 olp-hook.exe
+          pack_one linux-x64    linux-x64   olp-hook
+          pack_one linux-arm64  linux-arm64 olp-hook
+          pack_one darwin-arm64 macos-arm64 olp-hook
+          pack_one darwin-x64   macos-x64   olp-hook
+          cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS
+          for f in olp-hook-windows-x64.zip olp-hook-linux-x64.tar.gz olp-hook-linux-arm64.tar.gz olp-hook-macos-arm64.tar.gz olp-hook-macos-x64.tar.gz; do grep -q " $f\$" SHA256SUMS || { echo "SHA256SUMS 에 $f 없음"; exit 1; }; done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  e2e:
+    name: e2e ${{ matrix.key }}
+    needs: pack
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { key: win32-x64,    os: windows-latest }
+          - { key: darwin-arm64, os: macos-latest }
+          - { key: darwin-x64,   os: macos-15-intel }
+          - { key: linux-x64,    os: ubuntu-latest }
+          - { key: linux-arm64,  os: ubuntu-24.04-arm }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: 설치 끝에서 끝까지 시험(npm 설치 -> olp install -> 훅 실행 + 혼돈 사례)
+        shell: bash
+        run: bash tools/olp-hook/e2e/olp_e2e.sh "$GITHUB_WORKSPACE/dist" ${{ matrix.key }}
+
+  # L2: does real Claude Code (claude -p) actually call the registered hook. Runs only when credentials exist. Model = haiku (cheapest).
+  # Without credentials it ends with one «skipped» line (green). Publishing does not wait for this job. --bare is not used because it skips hooks.
+  e2e-claude:
+    name: e2e claude -p ${{ matrix.key }} (열쇠 없으면 skipped — 통과 아님)
+    needs: pack
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { key: linux-x64,    os: ubuntu-latest }
+          - { key: darwin-arm64, os: macos-latest } # question: does Claude Code call the hook on macOS and Linux
+    env:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - name: 열쇠 확인
+        id: key
+        shell: bash
+        run: |
+          if [ -z "${CLAUDE_CODE_OAUTH_TOKEN}${ANTHROPIC_API_KEY}" ]; then
+            echo "::warning title=L2 skipped::비밀값 CLAUDE_CODE_OAUTH_TOKEN·ANTHROPIC_API_KEY 둘 다 없음 — 진짜 Claude Code 확인 0회(통과 아님)"
+            echo "## L2 = SKIPPED (열쇠 없음, 진짜 Claude Code 확인 0회)" >> "$GITHUB_STEP_SUMMARY"
+            echo "have=0" >> "$GITHUB_OUTPUT"
+          else echo "have=1" >> "$GITHUB_OUTPUT"; fi
+      - uses: actions/setup-node@v4
+        if: steps.key.outputs.have == '1'
+        with:
+          node-version: '22.x'
+      - uses: actions/download-artifact@v4
+        if: steps.key.outputs.have == '1'
+        with:
+          name: dist
+          path: dist
+      - name: npm 설치 → olp install → claude -p 가 훅을 부르나
+        if: steps.key.outputs.have == '1'
+        shell: bash
+        run: |
+          set -eu
+          # an empty secret arrives as an empty string; unset it so an empty API key does not hide the subscription token
+          [ -n "${ANTHROPIC_API_KEY:-}" ] || unset ANTHROPIC_API_KEY; [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] || unset CLAUDE_CODE_OAUTH_TOKEN
+          npm install -g @anthropic-ai/claude-code >/dev/null 2>&1 && claude --version
+          export HOME="$(mktemp -d)"; P="$(mktemp -d)/proj"; mkdir -p "$P/build"; cd "$P"
+          git init -q && echo a > build/a.txt && echo x > app.js && git add -A && git -c user.email=e@x -c user.name=e commit -qm init
+          npm init -y >/dev/null && npm install --no-audit --no-fund "$GITHUB_WORKSPACE/dist/feedpia-olp-${{ matrix.key }}-0.1.0.tgz" "$GITHUB_WORKSPACE/dist/feedpia-olp-0.1.0.tgz" >/dev/null
+          npx --no-install olp install </dev/null
+          before=$(wc -l < .olp/hook-log.jsonl 2>/dev/null || echo 0)
+          # One delete and one read-only run. After each, print the hook log line count and verdict (the log never holds the command text; the command comes from the denials list in the claude JSON result).
+          run_claude() { # run_claude <name> <command>
+            local b a; b=$(wc -l < .olp/hook-log.jsonl 2>/dev/null || echo 0)
+            claude -p "Use the Bash tool to run exactly this command and nothing else, then stop: $2" --model haiku --output-format json > "claude_$1.json" || true
+            a=$(wc -l < .olp/hook-log.jsonl 2>/dev/null || echo 0)
+            echo "== $1: 명령 «$2» · 훅 기록 줄 ${b} -> ${a}"
+            node -e 'const r=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const d=(r.permission_denials||[]).map(x=>x.tool_name+": "+JSON.stringify(x.tool_input));console.log("   claude 결과: is_error="+r.is_error+" 거절된 도구 "+d.length+"개 "+d.join(" | "))' "claude_$1.json" || echo "   claude 결과 json 읽기 실패"
+            # hook log lines as written (by design no paths or command text — kind, count, verdict and time only)
+            [ "$a" -gt "$b" ] && tail -n $((a-b)) .olp/hook-log.jsonl | cut -c1-400 | sed 's/^/   훅 기록: /' || true
+            echo "$1 $b $a" >> calls.txt
+          }
+          run_claude delete "rm -rf build"
+          run_claude read "git status --short"
+          test -f build/a.txt && echo "build/a.txt 남아 있음(카드 = 묻기 → 비대화 모드에서 실행 안 됨)" || echo "build/a.txt 지워짐"
+          { echo "## L2 = RAN (claude $(claude --version))"; echo '```'; cat calls.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          read _ b a < <(grep '^delete ' calls.txt); test "$a" -gt "$b"   # proof that the hook was actually called on the delete
+
+  # Video: record the real screen per OS with VHS (charmbracelet, MIT) → Actions artifact olp-video-<os>. Publishing does not wait for this job.
+  # Scene 1 = install + hook (no Claude Code, same input) · scene 2 = real interactive Claude Code (only with a subscription token; Windows is left out because the scene is bash).
+  video:
+    name: video ${{ matrix.key }}
+    needs: pack
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    continue-on-error: ${{ matrix.key == 'win32-x64' }} # Windows runs to the end but does not block publishing or other jobs
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { key: linux-x64,    os: ubuntu-latest }
+          - { key: darwin-arm64, os: macos-latest }
+          - { key: win32-x64,    os: windows-latest }   # scene 1 (install + hook) only — scene 2 on Windows is the video-windows job (pywinpty)
+    env:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: 한글 글꼴(리눅스)
+        if: startsWith(matrix.key, 'linux-')
+        run: sudo apt-get update -q && sudo apt-get install -y -q fonts-noto-cjk
+      - name: VHS 설치(실행은 아래에서)
+        if: matrix.key != 'win32-x64'   # On Windows this install hangs for over 30 minutes → Windows uses the video-windows job (pywinpty)
+        timeout-minutes: 10
+        uses: charmbracelet/vhs-action@v2
+        with:
+          install-fonts: 'true'
+      - name: Claude Code 설치(토큰 있을 때만, 판 글자를 자막에 넣으려고 준비 전에)
+        shell: bash
+        run: |
+          if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then npm install -g @anthropic-ai/claude-code >/dev/null 2>&1 && claude --version; else echo "토큰 없음 — 장면 2 건너뜀 예정"; fi
+      - name: 준비(가짜 홈·데모 폴더·npm 설치·tape 채우기)
+        shell: bash
+        run: bash tools/olp-hook/e2e/rec/rec_prep.sh "$GITHUB_WORKSPACE/dist" ${{ matrix.key }} "$GITHUB_WORKSPACE/rec"
+      - name: 장면 1 녹화(설치 + 훅)
+        if: matrix.key != 'win32-x64'
+        timeout-minutes: 10
+        shell: bash
+        run: vhs "$GITHUB_WORKSPACE/rec/scene_hook.tape"
+      # Real interactive Claude Code — a test (Wait assertions) and a video for each of Korean and English. If red, retry once; if still red, fail and keep the screen text.
+      - name: 장면 2 시험·녹화(진짜 Claude Code 대화형, 한·영)
+        timeout-minutes: 15
+        shell: bash
+        run: |
+          if [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+            echo "::warning title=video claude skipped::CLAUDE_CODE_OAUTH_TOKEN 없음 — 진짜 Claude Code 화면 0회"
+            echo "## video claude = SKIPPED (토큰 없음)" >> "$GITHUB_STEP_SUMMARY"; exit 0
+          fi
+          if [ "${{ matrix.key }}" = "win32-x64" ]; then echo "Windows 장면 2 = video-windows 칸"; exit 0; fi
+          fail=0
+          for L in en ko; do
+            ok=0
+            for try in 1 2; do
+              echo "== ${{ matrix.key }} $L 시도 $try"
+              if vhs "$GITHUB_WORKSPACE/rec/scene_claude_$L.tape"; then ok=1; break; fi
+              cp "$GITHUB_WORKSPACE/rec/olp-claude-${{ matrix.key }}-$L.txt" "$GITHUB_WORKSPACE/rec/fail-${{ matrix.key }}-$L-try$try.txt" 2>/dev/null || true
+            done
+            if [ $ok = 1 ]; then echo "PASS ${{ matrix.key }} $L: 지우기 = 허락 창 + OLP 카드 → 아니오 → 파일 남음 / 둘러보기 = 창 없이 결과"; echo "- ${{ matrix.key }} $L: PASS" >> "$GITHUB_STEP_SUMMARY"
+            else echo "FAIL ${{ matrix.key }} $L (2번 다)"; echo "- ${{ matrix.key }} $L: FAIL" >> "$GITHUB_STEP_SUMMARY"; fail=1; fi
+          done
+          exit $fail
+      - name: 녹화 글자 사적 정보 검사(@·runner·토큰 꼴 있으면 빨강, 영상 안 올림)
+        if: always()
+        shell: bash
+        run: |
+          cd "$GITHUB_WORKSPACE/rec" || exit 0
+          bad=0
+          for f in olp-*.txt fail-*.txt; do
+            [ -f "$f" ] || continue
+            if grep -nEi '[a-z0-9._%+-]+@[a-z0-9-]+\.[a-z]{2,}|runneradmin|/home/runner|/Users/runner|sk-ant|oauth' "$f"; then echo "사적 정보 꼴: $f"; bad=1; fi
+          done
+          if [ $bad = 1 ]; then rm -f olp-*.mp4 olp-*.gif olp-*.cast fail-*.txt; echo "## 사적 정보 꼴 발견 → 영상 지움" >> "$GITHUB_STEP_SUMMARY"; exit 1; fi
+          echo "사적 정보 꼴 0"
+      - name: 녹화 파일 목록
+        if: always()
+        shell: bash
+        run: ls -la "$GITHUB_WORKSPACE/rec" || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: olp-video-${{ matrix.key }}
+          path: |
+            rec/*.mp4
+            rec/*.gif
+            rec/fail-*.txt
+          if-no-files-found: warn
+          retention-days: 14
+
+  # Real interactive claude through pywinpty (ConPTY).
+  # Recording = received screen text as an asciinema cast → agg (official asciinema GIF generator, Apache-2.0) → gif, and mp4 when ffmpeg exists. Everything is installed on the runner only.
+  video-windows:
+    name: video claude win32-x64 (pywinpty, 끝까지 — 게시 안 막음)
+    needs: pack
+    runs-on: windows-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    env:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: 토큰 확인
+        id: tok
+        shell: bash
+        run: |
+          if [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then echo "::warning title=video windows skipped::토큰 없음"; echo "have=0" >> "$GITHUB_OUTPUT"; else echo "have=1" >> "$GITHUB_OUTPUT"; fi
+      - name: 도구(러너 안에서만) — claude · pywinpty · agg
+        if: steps.tok.outputs.have == '1'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          npm install -g @anthropic-ai/claude-code >/dev/null 2>&1 && claude --version
+          python -m pip install -q pywinpty
+          mkdir -p "$RUNNER_TEMP/agg" && gh release download -R asciinema/agg -p 'agg-x86_64-pc-windows-msvc.exe' -D "$RUNNER_TEMP/agg" && mv "$RUNNER_TEMP/agg/agg-x86_64-pc-windows-msvc.exe" "$RUNNER_TEMP/agg/agg.exe" && "$RUNNER_TEMP/agg/agg.exe" --version
+          command -v ffmpeg && ffmpeg -version | head -1 || echo "ffmpeg 없음 → gif 만"
+      - name: 준비(가짜 홈·데모 폴더·npm 설치·olp install)
+        if: steps.tok.outputs.have == '1'
+        shell: bash
+        run: |
+          bash tools/olp-hook/e2e/rec/rec_prep.sh "$GITHUB_WORKSPACE/dist" win32-x64 "$GITHUB_WORKSPACE/rec"
+          cd /c/olp-demo/proj && USERPROFILE='C:/olp-demo/home' HOME='C:/olp-demo/home' npx --no-install olp install </dev/null
+      - name: 시험·녹화(진짜 Claude Code 대화형, 한·영)
+        if: steps.tok.outputs.have == '1'
+        timeout-minutes: 15
+        shell: bash
+        env:
+          PYTHONIOENCODING: utf-8   # Korean log output crashed under cp1252
+          PYTHONUTF8: '1'
+        run: |
+          export USERPROFILE='C:\olp-demo\home' HOME='C:/olp-demo/home'
+          V="$(claude --version | head -1 | awk '{print $1}')"
+          fail=0
+          for L in en ko; do
+            if python tools/olp-hook/e2e/rec/tui_win.py 'C:\olp-demo\proj' "$GITHUB_WORKSPACE/rec" "$L" "$V"; then echo "- win32-x64 $L: PASS" >> "$GITHUB_STEP_SUMMARY"
+            else echo "- win32-x64 $L: FAIL" >> "$GITHUB_STEP_SUMMARY"; fail=1; fi
+          done
+          exit $fail
+      - name: 녹화 글자 사적 정보 검사
+        if: always() && steps.tok.outputs.have == '1'
+        shell: bash
+        run: |
+          cd "$GITHUB_WORKSPACE/rec" || exit 0
+          bad=0
+          for f in olp-*.txt fail-*.txt; do
+            [ -f "$f" ] || continue
+            if grep -nEi '[a-z0-9._%+-]+@[a-z0-9-]+\.[a-z]{2,}|runneradmin|/home/runner|/Users/runner|sk-ant|oauth' "$f"; then echo "사적 정보 꼴: $f"; bad=1; fi
+          done
+          if [ $bad = 1 ]; then rm -f olp-*.cast olp-*.gif olp-*.mp4 fail-*.txt; echo "## 사적 정보 꼴 발견 → 녹화 지움" >> "$GITHUB_STEP_SUMMARY"; exit 1; fi
+          echo "사적 정보 꼴 0"
+      - name: cast → gif(agg) · mp4(ffmpeg 있으면)
+        if: always() && steps.tok.outputs.have == '1'
+        shell: bash
+        run: |
+          cd "$GITHUB_WORKSPACE/rec" || exit 0
+          for c in olp-claude-win32-x64-*.cast; do
+            [ -f "$c" ] || continue
+            g="${c%.cast}.gif"
+            "$RUNNER_TEMP/agg/agg.exe" --font-family "Cascadia Mono,Consolas,Malgun Gothic" --font-size 18 "$c" "$g" || echo "agg 실패: $c"
+            if command -v ffmpeg >/dev/null && [ -f "$g" ]; then ffmpeg -loglevel error -y -i "$g" -movflags faststart -pix_fmt yuv420p -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${c%.cast}.mp4" || true; fi
+          done
+          ls -la
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: olp-video-win32-x64-claude
+          path: |
+            rec/olp-claude-win32-x64-*.gif
+            rec/olp-claude-win32-x64-*.mp4
+            rec/olp-claude-win32-x64-*.cast
+            rec/fail-*.txt
+          if-no-files-found: warn
+          retention-days: 14
+
+  # Unfamiliar environments — Node versions, slow first start, minimal container. No macOS jobs here (macOS minutes cost ×10).
+  # Fails when a delete is not a card within 10 s, hangs or crashes. A prompt on a read-only command in a slow job is recorded as a FACT line.
+  e2e-env:
+    name: e2e env ${{ matrix.label }}
+    needs: pack
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { label: "linux-x64 node18 (돌려 봄, 약속 아님)", os: ubuntu-latest,  key: linux-x64, node: '18.x', slow: '' }
+          - { label: "linux-x64 node20",                     os: ubuntu-latest,  key: linux-x64, node: '20.x', slow: '' }
+          - { label: "linux-x64 node24",                     os: ubuntu-latest,  key: linux-x64, node: '24.x', slow: '' }
+          - { label: "linux-x64 slow (CPU 1개, 낮은 우선순위)", os: ubuntu-latest, key: linux-x64, node: '22.x', slow: 'cpu' }
+          - { label: "linux-arm64 slow (CPU 1개, 낮은 우선순위)", os: ubuntu-24.04-arm, key: linux-arm64, node: '22.x', slow: 'cpu' }
+          - { label: "win32-x64 cold (데우기 없음)",          os: windows-latest, key: win32-x64, node: '22.x', slow: 'cold' }
+          # Both PowerShell 5.1 and 7: run the registered hook command in that shell (the setup without Git Bash)
+          - { label: "win32-x64 hook shell = Windows PowerShell 5.1", os: windows-latest, key: win32-x64, node: '22.x', slow: '', hookshell: powershell }
+          - { label: "win32-x64 hook shell = PowerShell 7 (pwsh)",    os: windows-latest, key: win32-x64, node: '22.x', slow: '', hookshell: pwsh }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: e2e (${{ matrix.label }})
+        shell: bash
+        env:
+          OLP_E2E_LABEL: ${{ matrix.label }}
+          OLP_E2E_SLOW: ${{ matrix.slow != '' && '1' || '' }}
+          OLP_E2E_HOOKSHELL: ${{ matrix.hookshell || '' }}
+        run: |
+          node --version; npm --version; [ -n "${OLP_E2E_HOOKSHELL}" ] && "${OLP_E2E_HOOKSHELL}" -NoProfile -Command '$PSVersionTable.PSVersion.ToString()' || true
+          if [ "${{ matrix.slow }}" = "cpu" ]; then
+            taskset -c 0 nice -n 19 bash tools/olp-hook/e2e/olp_e2e.sh "$GITHUB_WORKSPACE/dist" ${{ matrix.key }}
+          else
+            bash tools/olp-hook/e2e/olp_e2e.sh "$GITHUB_WORKSPACE/dist" ${{ matrix.key }}
+          fi
+
+  # Minimal container: plain ubuntu:24.04 (root, no git user config, only node and git installed).
+  e2e-container:
+    name: e2e env linux-x64 container ubuntu:24.04
+    needs: pack
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container: ubuntu:24.04
+    steps:
+      - name: 최소 도구(git·node 만)
+        run: apt-get update -q && DEBIAN_FRONTEND=noninteractive apt-get install -y -q git ca-certificates nodejs npm >/dev/null && node --version && npm --version && git --version
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: e2e (컨테이너)
+        shell: bash
+        env:
+          OLP_E2E_LABEL: linux-x64 container ubuntu:24.04
+        run: bash tools/olp-hook/e2e/olp_e2e.sh "$GITHUB_WORKSPACE/dist" linux-x64
+
+  publish:
+    name: npm 게시 + 릴리스 초안 (태그만)
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [pack, e2e]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write       # release draft
+      id-token: write       # npm provenance and trusted publishing
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+          registry-url: 'https://registry.npmjs.org'
+      - name: npm ≥ 11.5.1(신뢰 게시 조건)
+        run: npm install -g npm@11 && npm --version
+      - name: 게시 — 운영체제별 4개 먼저, 본 패키지 마지막
+        shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }} # first release only; removed after switching to trusted publishing
+        run: |
+          cd dist
+          for p in feedpia-olp-win32-x64 feedpia-olp-darwin-arm64 feedpia-olp-darwin-x64 feedpia-olp-linux-x64 feedpia-olp-linux-arm64 feedpia-olp-0; do
+            f=$(ls ${p}*.tgz | head -1); echo "publish $f"
+            npm publish "$f" --provenance --access public
+          done
+      - name: GitHub release draft (publish by hand)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" dist/olp-hook-*.zip dist/olp-hook-*.tar.gz dist/SHA256SUMS --verify-tag --draft --title "${GITHUB_REF_NAME}" # draft → public = by hand

@@ -1,0 +1,11 @@
+{
+  "name": "olp-hook",
+  "displayName": "OLP hook",
+  "version": "0.1.0",
+  "description": "Before an AI agent does something it can't undo, OLP counts what will be lost. This hook puts a card in the permission prompt before a shell command or MCP tool deletes, overwrites, or moves money. Runs on your device; the hook makes no network calls (an optional daily signal is off by default). Before engine check, no receipt.",
+  "author": {
+    "name": "FeedPia"
+  },
+  "license": "MIT",
+  "keywords": ["hooks", "permissions", "agents", "mcp"]
+}

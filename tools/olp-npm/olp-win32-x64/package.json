@@ -1,0 +1,23 @@
+{
+  "name": "@feedpia/olp-win32-x64",
+  "version": "0.1.0",
+  "description": "olp-hook for Windows x64. Installed by @feedpia/olp; do not install directly.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/feedpia/outcome-lookahead-protocol.git"
+  },
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "files": [
+    "bin/"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "preferUnplugged": true
+}

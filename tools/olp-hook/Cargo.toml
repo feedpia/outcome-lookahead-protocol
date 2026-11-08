@@ -1,0 +1,27 @@
+[package]
+name = "olp-hook"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+description = "OLP device hook for Claude Code PreToolUse: shows what a write would remove before it runs. Before engine check, no receipt. No network."
+
+# Standalone workspace with its own Cargo.lock, so it is never built together with other crates in the repository.
+[workspace]
+
+[lib]
+name = "olp_hook"
+path = "src/lib.rs"
+
+[[bin]]
+name = "olp-hook"
+path = "src/main.rs"
+
+[dependencies]
+# Exact versions pinned (MIT OR Apache-2.0); no other dependencies.
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+
+[profile.release]
+# The hook catches a panic and turns it into a block (exit 2). With abort, Claude Code would see a non-blocking error and let the call run.
+panic = "unwind"
