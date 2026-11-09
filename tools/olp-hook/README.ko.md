@@ -1,10 +1,10 @@
 # olp-hook — 지우기·덮어쓰기 전에, 무엇이 사라지는지 먼저 봅니다
 
-**0.1.1**
+**0.1.2**
 
 OLP(Outcome Lookahead Protocol)는 에이전트의 행동이 낳을 결과를 내다보는 방법을 정한 공개 규격입니다.
 
-0.1.1: Claude Code 훅 — 지우기 직전엔 어떤 파일이 몇 개인지, 덮어쓰기 직전엔 몇 개인지 카드로 보여 줍니다.
+0.1.2: Claude Code 훅 — 지우기 직전엔 어떤 파일이 몇 개인지, 덮어쓰기 직전엔 몇 개인지 카드로 보여 줍니다.
 
 `rm -rf build` 가 실행되기 전, Claude Code 확인 창에서:
 
@@ -26,7 +26,7 @@ Korean subtitles:
 
 https://github.com/user-attachments/assets/3d8dd4bc-a772-435c-88a5-6efbc3443e76
 
-Recorded on 0.1.0. The card behaves the same in 0.1.1.
+Recorded on 0.1.0. The card behaves the same in 0.1.2.
 
 **되돌릴 수 없는 승인 앞에서, 무엇이 바뀌는지 먼저 보여 드립니다.**
 
@@ -53,8 +53,8 @@ npx @feedpia/olp install
 - `--dry-run` 은 바꿀 내용만 보여 주고 아무것도 바꾸지 않습니다. `--user` 는 사용자 설정(`~/.claude/settings.json`)을 고칩니다. `--replace` 는 이미 있는 `olp-hook` 칸을 새 복사본으로 바꿉니다.
 - 홈 폴더에서 `--user` 없이 치면 아무것도 바꾸지 않고 멈춥니다. 그 자리의 설정 파일은 모든 프로젝트에 걸리기 때문입니다. 프로젝트 폴더 안에서 치거나, 정말 모든 프로젝트에 걸려면 `--user` 를 붙이세요.
 - `.olp/hook-config.json` 의 `{"decision": true}`(실험, 기본 꺼짐): 지우는 파일이 2개 이상이고 그중 git 에 없는 파일이 있으면, 훅이 그 지우기를 한 번 멈추고 에이전트에게 물어볼 선택지 3개(취소가 첫 칸, 그다음 일부 남기기·전부 지우기)를 줍니다. 고른 것은 에이전트의 다음 지시이고, 다음 지우기에는 보통 카드와 허락 창이 뜹니다.
-- 업데이트: 같은 설치 명령을 다시 실행합니다. 0.1.1은 스스로 업데이트하지 않습니다.
-- 되돌리기: `npx @feedpia/olp uninstall` 은 `olp-hook` 줄만 뺍니다. `olp` 폴더의 프로그램은 남겨 두니, 필요 없으면 그 폴더를 지우세요.
+- 업데이트: 같은 설치 명령을 다시 실행합니다. 0.1.2는 스스로 업데이트하지 않습니다.
+- 되돌리기: `npx @feedpia/olp uninstall` 은 Claude Code 설정 파일에서 `olp-hook` 칸을 뺍니다. 파일 전체를 표준 JSON 꼴로 다시 쓰므로 띄어쓰기·줄바꿈이 바뀔 수 있고, 설치 때 생긴 빈 훅 목록(예: `"PostToolUse": []`)이 남을 수 있습니다. 다른 설정은 전과 같이 동작합니다. `olp` 폴더의 프로그램은 남겨 두니, 필요 없으면 그 폴더를 지우세요.
 - 복사본은 패키지 안의 파일과 한 바이트씩 비교합니다. 이것은 복사가 깨지지 않았다는 뜻일 뿐, 패키지가 우리 것이라는 뜻은 아닙니다. 그것은 릴리스의 `SHA256SUMS` 로 확인하세요.
 - 릴리스에서 받았다면 — 묶음 `olp-hook-<os>-<arch>.zip`/`.tar.gz` 를 프로젝트 밖(예: 내려받기 폴더)에 푸세요(안의 이름 `olp-hook`, Windows 는 `olp-hook.exe` — 바꾸지 마세요). macOS 에서 브라우저로 받으면 서명 없는 판이라 막히니 먼저 `xattr -d com.apple.quarantine <경로>/olp-hook` 을 치세요. 그다음 프로젝트 폴더 안에서 그 파일을 `install` 로 실행합니다: `~/Downloads/olp-hook install`(Windows: `~\Downloads\olp-hook.exe install`). 자기 자신을 `~/olp/` 로 복사하고 `.claude/settings.json` 에 전체 경로를 적습니다. 이름을 바꿨으면 install 은 아무것도 바꾸지 않고 한 줄 이유를 보이며 멈춥니다.
 
@@ -62,7 +62,7 @@ npx @feedpia/olp install
 
 ## 작동 방식
 
-**엔진 확인 전 · 영수증 없음.** 이 훅은 당신 기기에서만 돌고, 훅 스스로는 네트워크에 연결하지 않습니다. 따로 켜는 하루 사용 숫자(숫자만)는 아래에 적었고, 기본은 꺼져 있으며 예라고 답한 사람만 보냅니다.
+**엔진 확인 전 · 영수증 없음.** 이 훅은 당신 기기에서만 돌고, 훅 스스로는 네트워크에 연결하지 않습니다. npm 에서 설치할 때는 네트워크가 필요하고, 설치한 뒤 훅 자체는 네트워크 없이 동작합니다. 따로 켜는 하루 사용 숫자(숫자만)는 아래에 적었고, 기본은 꺼져 있으며 예라고 답한 사람만 보냅니다.
 
 설정은 Claude Code 설정 파일(`.claude/settings.json`의 `hooks` 항목)에 한 줄입니다. 같은 실행 파일이 도구 호출 앞뒤에서 돕니다.
 
@@ -196,7 +196,7 @@ olp-hook classify --bash "psql" writes_other --db-count 42
 
 ## 따로 켜는 하루 사용 숫자 (기본 꺼짐)
 
-터미널에서 `npx @feedpia/olp install`을 마치면 한 번 묻습니다: "Send anonymous daily usage numbers to FeedPia? (counts only, no commands or file names) [y/N]". Enter는 아니오입니다. 질문이 뜨기 전에 누른 키는 버리므로, 질문을 본 뒤 친 답만 셉니다. 이 질문에 사람이 `y`를 쳐야만 예입니다. 명령 옵션이나 환경 변수로는 예가 되지 않고, 프로젝트 안의 파일도 예로 치지 않습니다. 터미널 없이(파이프·CI·에이전트) 설치하면 묻지 않고 아무것도 보내지 않습니다. 손으로 설치한 프로젝트에서는 `olp-hook setup`이 같은 질문을 하고, 끈 뒤 다시 켤 때도 이것을 씁니다. 예라고 답한 사람만 보냅니다.
+터미널에서 `npx @feedpia/olp install`을 마치면 한 번 묻습니다: "Send daily usage counts to FeedPia? (a random per-project ID that stays the same; never names, commands, or file names) [y/N]". Enter는 아니오입니다. 질문이 뜨기 전에 누른 키는 버리므로, 질문을 본 뒤 친 답만 셉니다. 이 질문에 사람이 `y`를 쳐야만 예입니다. 명령 옵션이나 환경 변수로는 예가 되지 않고, 프로젝트 안의 파일도 예로 치지 않습니다. 터미널 없이(파이프·CI·에이전트) 설치하면 묻지 않고 아무것도 보내지 않습니다. 손으로 설치한 프로젝트에서는 `olp-hook setup`이 같은 질문을 하고, 끈 뒤 다시 켤 때도 이것을 씁니다. 예라고 답한 사람만 보냅니다.
 
 예라고 답하면 답과 무작위 식별자가 프로젝트 밖 `<홈>/olp/usage/`(프로젝트 폴더마다 한 파일, 이름은 폴더 경로의 해시)에 저장되고, `.claude/settings.json`에 `SessionStart` 칸 하나(`olp-hook signal --session-start`)가 더해집니다. 새 Claude Code 세션이 시작될 때 UTC 하루(00:00 UTC)에 많아야 한 번, 아래 칸만 보냅니다:
 
@@ -216,7 +216,7 @@ olp-hook classify --bash "psql" writes_other --db-count 42
 
 숫자는 지난번 보낸 뒤부터 이번에 보내기 10분 전까지 훅이 남긴 기록입니다(결정 카드의 10분이 끝난 뒤에 셈). 숫자마다 10000에서 멈춥니다. 명령·경로·파일·폴더 이름·금액·답 글자는 보내지 않습니다. 서버는 IP 주소와 `install_id` 원문을 저장하지 않습니다. 서버 합계는 받은 날 기준입니다. 한 번 보낸 숫자에 지난번 보낸 뒤 여러 날이 들어 있을 수 있습니다.
 
-동봉 설정 파일의 `https://` 주소로만 보냅니다. 넘겨주기(리다이렉트)는 따라가지 않고, 당신의 curl 설정 파일은 읽지 않으며, 세션 시작 때는 2초에서 멈춥니다(`olp-hook signal` 을 직접 치면 5초까지 기다리고, 보냄 · 시간 안에 답 없음(도착했을 수 있음) · 보내지 않음 중 무엇인지 알려 줍니다). 프로젝트의 `.olp/hook-config.json`은 끄기만 할 수 있고(`"signal_endpoint": ""`), 주소를 바꿀 수는 없습니다. 실패해도 그날 다시 보내지 않고, 아무것도 출력하지 않으며, 훅의 판정은 바뀌지 않습니다. 훅 자체(PreToolUse/PostToolUse)는 보내지 않습니다.
+동봉 설정 파일의 `https://` 주소로만 보냅니다. 넘겨주기(리다이렉트)는 따라가지 않고, 당신의 curl 설정 파일은 읽지 않으며, 5초에서 멈춥니다. 세션 시작 때는 훅이 기다리지 않아 세션이 느려지지 않고, `olp-hook signal` 을 직접 치면 기다렸다가 보냄 · 시간 안에 답 없음(도착했을 수 있음) · 보내지 않음 중 무엇인지 알려 줍니다. 프로젝트의 `.olp/hook-config.json`은 끄기만 할 수 있고(`"signal_endpoint": ""`), 주소를 바꿀 수는 없습니다. 실패해도 그날 다시 보내지 않고, 아무것도 출력하지 않으며, 훅의 판정은 바뀌지 않습니다. 훅 자체(PreToolUse/PostToolUse)는 보내지 않습니다.
 
 언제든 `npx @feedpia/olp telemetry off`로 끕니다(`SessionStart` 칸과 식별자를 지움). `OLP_HOOK_SIGNAL=off`도 멈추고, 이것이 늘 이깁니다.
 
@@ -240,7 +240,7 @@ Claude Code 설정에서 `olp-hook` 줄을 지웁니다(`olp-hook uninstall`이 
 - **셸 명령이 모두 hook error 로 막힐 때:** Claude Code 가 `olp-hook` 을 실행하지 못했고(없음·고장·시간 초과), `"onFailure": "block"` 때문에 일부러 막은 것입니다. `.claude/settings.json` 의 `command` 경로에 `olp-hook` 파일이 실제로 있는지 확인하세요(기본은 홈 폴더의 `olp` 폴더, Windows 는 `olp-hook.exe`).
 - 바로 끄려면 프로젝트의 `.claude/settings.json` 에서 이 안내로 넣은 `hooks` 칸을 빼세요. 그 프로젝트에서 바로 멈춥니다.
 
-## 알려진 한계 (0.1.1)
+## 알려진 한계 (0.1.2)
 
 - OLP가 아직 모르는 명령은 읽기만 해도 확인을 묻습니다. 아는 명령은 버전마다 늘려 갑니다.
 - 느린 PC에서는 PowerShell 명령에 확인을 묻는 일이 잦아질 수 있습니다. 지우기·덮어쓰기 카드는 그대로 뜹니다.
@@ -251,7 +251,7 @@ Claude Code 설정에서 `olp-hook` 줄을 지웁니다(`olp-hook uninstall`이 
 - 지울 폴더가 작업 폴더 자체이거나 그 위 폴더일 때(예: `rm -rf /경로/프로젝트`, `rm -rf .`) Claude Code는 자체 «Dangerous rm» 창을 띄우고 그 창에 OLP 카드를 넣지 않아, Yes 한 번이면 파일 목록 없이 지워집니다. 이 꼴은 OLP가 묻지 않고 막습니다. 아무것도 지워지지 않고, 카드는 에이전트에게 가며, 상대 경로로 다시 하거나 터미널에서 직접 하라는 안내가 붙습니다. PowerShell `Remove-Item`은 해당하지 않습니다. OLP가 어느 폴더인지 풀 수 없는 꼴(변수 `"$DIR"/*`, `bash -c "rm …"`, `/*` 무늬)은 지금처럼 묻기만 하므로, 그 꼴에서는 Claude Code 자체 창이 먼저 뜰 수 있습니다.
 - `PreToolUse` 칸의 `"onFailure": "block"` 은 `olp-hook` 이 없거나, 실패하거나, `timeout` 을 넘기면 Claude Code 가 그 호출을 막게 합니다(Claude Code v2.1.295 이상). 이 칸이 없거나 Claude Code 가 그보다 옛 판이면 도구가 그냥 실행될 수 있습니다. `timeout` 은 `hook_budget_ms` 보다 길게 두세요. 훅은 예산(기본 5초)에서 스스로 멈추므로, 10초 `timeout` 은 Claude Code 가 끼어들기 전에 여유를 줍니다.
 - `read_only`로 표시한 명령 묶음(예: `python`)은 통째로 지나갑니다. 정말 읽기만 하는 묶음만 표시하세요. `git` 자체를 `read_only`로 표시하지 마세요.
-- 이번 판은 Edit/Write를 걸지 않아서, 에이전트가 파일 편집 도구로 `.olp/hook-map.json`이나 `.claude/settings.json`을 바꿀 수 있습니다. 위험한 여섯 꼴은 그래도 잡히지만, 다른 답은 바뀔 수 있습니다. 다음 판은 답을 프로젝트 밖(홈 폴더)에 둡니다.
+- 이번 판은 Edit/Write를 걸지 않아서, 에이전트가 파일 편집 도구로 `.olp/hook-map.json`이나 `.claude/settings.json`을 바꿀 수 있습니다. 위험한 여섯 꼴은 그래도 잡히지만, 다른 답은 바뀔 수 있습니다. 답을 프로젝트 밖(홈 폴더)으로 옮기는 일은 이후 버전에서 할 예정이고, 날짜는 아직 정하지 않았습니다.
 - 같은 까닭으로, 에이전트가 파일 편집 도구로 `<홈>/olp/usage/`에 사용 숫자 답을 써서 보내기를 켤 수 있습니다. 그래도 나가는 것은 위 표의 숫자뿐입니다.
 - 카드 뒤 실행 안 됨은 호출이 실행됐다고 알려 오지 않았다는 뜻입니다. 확인 창에서 거절(No)한 것과 실행이 실패한 것을 구별하지 못합니다.
 - 숫자는 읽기만 해서 미리 본 값입니다. 정확히 무엇이 사라질지에 대한 약속이 아닙니다.

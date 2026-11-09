@@ -23,7 +23,7 @@ echo "console.log(1)" > app.js; echo a > build/a.log; echo b > build/b.log; echo
 git -c user.email=demo@example.com -c user.name=demo add app.js
 git -c user.email=demo@example.com -c user.name=demo -c commit.gpgsign=false commit -q -m app
 npm init -y >/dev/null 2>&1
-npm install --no-audit --no-fund "$DIST/feedpia-olp-$KEY-0.1.1.tgz" "$DIST/feedpia-olp-0.1.1.tgz" >/dev/null 2>&1
+npm install --no-audit --no-fund "$DIST/feedpia-olp-$KEY-0.1.2.tgz" "$DIST/feedpia-olp-0.1.2.tgz" >/dev/null 2>&1
 cp "$HERE/show-settings.js" "$HERE/hookdemo.js" "$BASE/proj/"
 printf 'node_modules/\npackage*.json\nshow-settings.js\nhookdemo.js\n' > .git/info/exclude
 

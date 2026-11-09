@@ -1,0 +1,6 @@
+{
+  "chaos": {"total": 78, "ok": 78, "panics": 0, "leaks": 0},
+  "e2e": {"install": 0, "hooks": 2, "card_delete": 1, "card_overwrite": 1, "uninstall": 0, "hooks_after": 0},
+  "t7c": {"m1_max_s": 0.5, "m4_min_s": 4, "m4_max_s": 7, "ctrl_min_s": 1.5, "alive_margin_s": 1.0},
+  "replay": {"missed": 0, "commands_min": 40000}
+}

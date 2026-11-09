@@ -381,7 +381,7 @@ fn install_in_home_without_user_refuses_and_writes_nothing() {
     fs::write(settings(&w.home), PRETTY_OTHER).unwrap();
     let e = run("install", &args(&[]), &home_as_project(&w)).unwrap_err();
     assert_eq!(e, "this folder is your home folder — a hook here applies to every project. Run install inside a project folder, or add --user if you want that.");
-    assert!(!e.contains("What OLP does now") && !e.contains("Send anonymous"), "no closing text or question after the refusal: {e}");
+    assert!(!e.contains("What OLP does now") && !e.contains("Send daily usage counts"), "no closing text or question after the refusal: {e}");
     assert_eq!(fs::read_to_string(settings(&w.home)).unwrap(), PRETTY_OTHER, "settings bytes unchanged");
     assert!(!w.home.join("olp").exists(), "no copy or backup");
 }

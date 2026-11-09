@@ -43,9 +43,22 @@ pub fn broad(rule: &str) -> bool {
     let shell = if r.starts_with("Bash(") { "Bash" } else { "PowerShell" };
     let map = DeviceMap::default();
     tails.iter().any(|t| {
-        let a = classify::assess(shell, &json!({ "command": format!("{prefix} {t}") }), &map, Path::new("."), Limits { counter: None });
+        let a = classify::assess(shell, &json!({ "command": format!("{prefix} {t}") }), &map, Path::new("."), Limits { counter: None, ps_parser: shell == "PowerShell" && expression(prefix) });
         !a.findings.is_empty()
     })
+}
+
+/// Is a PowerShell rule prefix an expression (`[IO.File]::Delete(…)`, `$f.Delete()`, `(…)`, `{…}`, `;`) rather than a command name with arguments?
+/// Only for these can the PowerShell parser find a delete the built-in list misses (it only adds findings), so only these keep the parser in the rule check
+/// (review C1 of DESIGN_INSTALL_PROGRESS_012). Command-name rules take the same path as on macOS/Linux: no powershell.exe per rule.
+fn expression(prefix: &str) -> bool {
+    prefix.contains("::") || prefix.contains(['$', '(', ')', '[', ']', '{', '}', ';', '`'])
+}
+
+/// Prefix of a wildcard PowerShell rule, if it is one (`PowerShell(<prefix>*)`).
+fn ps_prefix(rule: &str) -> Option<&str> {
+    let inner = rule.trim().strip_prefix("PowerShell(")?.strip_suffix(')')?.trim();
+    inner.ends_with('*').then(|| inner.trim_end_matches('*').trim_end_matches(':').trim())
 }
 
 /// Max characters of a rule name shown on screen.
@@ -69,9 +82,29 @@ fn allow_rules(file: &Path) -> Option<Vec<String>> {
     Some(v["permissions"]["allow"].as_array().into_iter().flatten().filter_map(|r| r.as_str().map(str::to_string)).collect())
 }
 
+fn settings_files(project: &Path, home: &Path) -> [std::path::PathBuf; 3] {
+    [home.join(".claude").join("settings.json"), project.join(".claude").join("settings.json"), project.join(".claude").join("settings.local.json")]
+}
+
+/// How many distinct rules the check will run through the PowerShell parser (expression prefixes, parser available). Install prints the long progress line only when this is above 0 (review C2), so "this can take a minute" is said only when a powershell.exe start per rule really follows.
+pub fn parser_rules(project: &Path, home: &Path) -> usize {
+    if !crate::ps_ast::enabled() {
+        return 0;
+    }
+    let mut seen: Vec<String> = Vec::new();
+    for f in &settings_files(project, home) {
+        for r in allow_rules(f).unwrap_or_default() {
+            if ps_prefix(&r).is_some_and(|p| !p.is_empty() && expression(p)) && !seen.contains(&r) {
+                seen.push(r);
+            }
+        }
+    }
+    seen.len()
+}
+
 /// Reads the user, project and local settings files (read-only). Missing files are skipped; malformed ones are counted in `unreadable` (never masked as "no rules").
 pub fn scan(project: &Path, home: &Path) -> Scan {
-    let files = [home.join(".claude").join("settings.json"), project.join(".claude").join("settings.json"), project.join(".claude").join("settings.local.json")];
+    let files = settings_files(project, home);
     let mut out = Scan::default();
     for f in &files {
         let Some(list) = allow_rules(f) else {

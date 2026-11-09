@@ -46,7 +46,7 @@ fn endpoint_ok(e: &str) -> bool {
 pub fn check_argv(a: &[&str]) -> bool {
     match a {
         ["-q", "--silent", "--show-error", "--fail", "--proto", p, "--max-redirs", "0", "--max-time", t, "--header", ct, "--data-binary", "@-", "--write-out", w, "--url", e] => {
-            // Time limit of 1-5 s. SessionStart uses the bundled 2 s (under its 3 s slot); a person running `signal` uses the bundled 5 s.
+            // Time limit of 1-5 s. Both SessionStart (which does not wait for curl, see `start`) and a person running `signal` use the bundled 5 s.
             *p == proto() && !p.is_empty() && *ct == CONTENT_TYPE && matches!(*t, "1" | "2" | "3" | "4" | "5") && *w == WRITE_OUT && endpoint_ok(e)
         }
         _ => false,
@@ -63,13 +63,7 @@ pub fn run(argv: &[String], body: &str) -> Result<(), String> {
     if let Ok(mut g) = CALLS.lock() {
         g.push(argv.to_vec());
     }
-    let mut child = std::process::Command::new("curl")
-        .args(argv)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|_| "not sent: curl not found".to_string())?;
+    let mut child = curl(argv).stdout(Stdio::piped()).spawn().map_err(|_| "not sent: curl not found".to_string())?;
     if let Some(mut si) = child.stdin.take() {
         let _ = si.write_all(body.as_bytes());
     }
@@ -79,6 +73,71 @@ pub fn run(argv: &[String], body: &str) -> Result<(), String> {
         Err(_) => Err(failure_text(None, timeout_s, false)),
     }
 }
+
+/// The one place curl is built (argument list already checked by the caller): body on stdin, stderr discarded.
+fn curl(argv: &[String]) -> std::process::Command {
+    let mut c = std::process::Command::new("curl");
+    c.args(argv).stdin(Stdio::piped()).stderr(Stdio::null());
+    c
+}
+
+/// Session start: launch curl with the body on stdin and return without waiting for it.
+/// Claude's first reply waits for SessionStart hooks to finish, so the hook must not wait for the server; curl stops on its
+/// own at its `--max-time`. Its output goes nowhere (nothing can reach the session). The day was recorded before this call,
+/// so the result is not needed. If curl is missing, Err = nothing is sent.
+pub fn start(argv: &[String], body: &str) -> Result<(), String> {
+    let refs: Vec<&str> = argv.iter().map(|s| s.as_str()).collect();
+    if !check_argv(&refs) {
+        return Err("not sent: arguments outside the closed list".to_string());
+    }
+    if let Ok(mut g) = CALLS.lock() {
+        g.push(argv.to_vec());
+    }
+    let mut c = curl(argv);
+    c.stdout(Stdio::null());
+    detach(&mut c);
+    let mut child = c.spawn().map_err(|_| "not sent: curl not found".to_string())?;
+    if let Some(mut si) = child.stdin.take() {
+        // A few hundred bytes fit in the pipe buffer; if curl already exited, the write error is ignored.
+        let _ = si.write_all(body.as_bytes());
+    }
+    Ok(())
+}
+
+/// No console window, and a separate process group so a Ctrl+Break in the parent console does not reach curl.
+/// Also stops curl from inheriting this process's own stdin/stdout/stderr handles: Windows children inherit every
+/// inheritable handle, and a caller reading the hook's output (Claude Code) would otherwise wait until curl exits.
+#[cfg(windows)]
+fn detach(c: &mut std::process::Command) {
+    use std::os::windows::process::CommandExt;
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetStdHandle(which: u32) -> *mut std::ffi::c_void;
+        fn SetHandleInformation(handle: *mut std::ffi::c_void, mask: u32, flags: u32) -> i32;
+    }
+    const HANDLE_FLAG_INHERIT: u32 = 1;
+    for which in [-10i32 as u32, -11i32 as u32, -12i32 as u32] {
+        // SAFETY: plain handle calls. GetStdHandle returns null or INVALID_HANDLE_VALUE when there is no handle; both are skipped, and a failed
+        // SetHandleInformation only leaves the handle inheritable (the old behaviour). curl gets its own null/pipe handles from `curl()`.
+        unsafe {
+            let h = GetStdHandle(which);
+            if !h.is_null() && h as isize != -1 {
+                SetHandleInformation(h, HANDLE_FLAG_INHERIT, 0);
+            }
+        }
+    }
+    c.creation_flags(0x0800_0000 | 0x0000_0200); // CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP
+}
+
+/// Own process group, so signals sent to the hook's group do not reach curl.
+#[cfg(unix)]
+fn detach(c: &mut std::process::Command) {
+    use std::os::unix::process::CommandExt;
+    c.process_group(0);
+}
+
+#[cfg(not(any(windows, unix)))]
+fn detach(_: &mut std::process::Command) {}
 
 /// True when curl's last output line (WRITE_OUT) says the TLS connection was set up, i.e. the request could have reached the server.
 fn request_went_out(stdout: &[u8]) -> bool {

@@ -23,7 +23,7 @@ Type "cd '@PROJ@' && clear"
 Enter
 Sleep 500ms
 Show
-Type "# OLP 0.1.1 · @OS@ · Claude Code @CCVER@ · @LANG@  (첫 실행 안내는 건너뜀)"
+Type "# OLP 0.1.2 · @OS@ · Claude Code @CCVER@ · @LANG@  (첫 실행 안내는 건너뜀)"
 Enter
 Sleep 2500ms
 

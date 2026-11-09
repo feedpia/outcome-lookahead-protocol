@@ -332,7 +332,8 @@ fn t5_server_failure_changes_no_verdict() {
     let call = json!({"session_id": "s", "transcript_path": "t", "cwd": p.to_string_lossy(), "hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "rm -rf build"}, "permission_mode": "default"}).to_string();
     let before = olp_hook::run_hook(call.as_bytes(), Some(&p));
     let msg = signal::send(&p, &h).unwrap();
-    assert!(msg.starts_with("not sent"), "{msg}");
+    // Session start no longer waits for curl, so it reports only that the send was started (or why not).
+    assert!(msg.starts_with("started") || msg.starts_with("not sent"), "{msg}");
     let after = olp_hook::run_hook(call.as_bytes(), Some(&p));
     assert_eq!((before.code, before.stdout, before.stderr), (after.code, after.stdout, after.stderr));
 }
@@ -429,16 +430,16 @@ fn d1_arguments_ignore_curlrc_and_redirects_with_a_short_cap() {
     let (argv, _) = ready(&p, &h);
     assert_eq!(argv[0], "-q", "first argument -q means the user .curlrc is not read");
     let a = argv.join(" ");
-    assert!(a.contains("--max-redirs 0") && a.contains("--max-time 2") && a.contains("--proto =https"), "{a}");
+    assert!(a.contains("--max-redirs 0") && a.contains("--max-time 5") && a.contains("--proto =https"), "{a}");
     assert!(!argv.iter().any(|x| x == "-L" || x.starts_with("--location")), "{a}");
     let r = |t: u64| {
         let v = signal::spawn::argv("https://x/y", t);
         signal::spawn::check_argv(&v.iter().map(|s| s.as_str()).collect::<Vec<_>>())
     };
-    assert!((1..=5).all(r) && !r(6) && !r(0), "time limit allowed only at 1-5 seconds (SessionStart itself uses the bundled 2 s, checked above)");
+    assert!((1..=5).all(r) && !r(6) && !r(0), "time limit allowed only at 1-5 seconds (SessionStart itself uses the bundled 5 s, checked above)");
     // A time limit from project config is not used
     fs::write(p.join(".olp/hook-config.json"), json!({"signal_timeout_s": 3}).to_string()).unwrap();
-    assert!(ready(&p, &h).0.join(" ").contains("--max-time 2"));
+    assert!(ready(&p, &h).0.join(" ").contains("--max-time 5"));
     let mut no_q = signal::spawn::argv("https://x/y", 2);
     no_q.remove(0);
     assert!(!signal::spawn::check_argv(&no_q.iter().map(|s| s.as_str()).collect::<Vec<_>>()), "rejected without -q");
@@ -449,7 +450,8 @@ fn d1_bundled_endpoint_is_https() {
     let (p, _) = tmp("d1_bundled");
     let cfg = olp_hook::config::load(&p).unwrap();
     assert!(olp_hook::config::bundled_signal_endpoint().is_some_and(|e| e.starts_with("https://")), "bundled endpoint");
-    assert_eq!(cfg.signal_timeout_s, Some(2), "curl 2s < SessionStart entry 3s");
+    // Session start does not wait for curl (tests/signal_detach.rs), so curl may use the full 5 s.
+    assert_eq!(cfg.signal_timeout_s, Some(5), "curl 5s, session start does not wait for it");
 }
 
 // ---- Never holds up the session: second run on the same day = no spawn, no binary output, exit 0 ----
@@ -546,5 +548,17 @@ fn b2_failure_text_follows_the_curl_exit_code() {
         assert_eq!(failure_text(Some(22), 5, reached), "not sent: the server answered with an error");
         assert_eq!(failure_text(Some(35), 5, reached), "not sent: curl returned an error");
         assert_eq!(failure_text(None, 5, reached), "not sent: curl returned an error");
+    }
+}
+
+/// Owner ledger 1099 ①: the usage question must not say "anonymous" — the record carries a random install id per project folder (a pseudonym).
+/// The prompt text and the two README quotes must be the same sentence.
+#[test]
+fn usage_question_says_random_install_id_not_anonymous() {
+    const NEW: &str = "Send daily usage counts to FeedPia? (a random per-project ID that stays the same; never names, commands, or file names) [y/N]";
+    for (name, text) in [("src/main.rs", include_str!("../src/main.rs")), ("README.md", include_str!("../README.md")), ("README.ko.md", include_str!("../README.ko.md"))] {
+        assert!(text.contains(NEW), "{name} must carry the corrected question: {NEW}");
+        assert!(!text.contains("Send anonymous daily usage numbers"), "{name} still has the old \"anonymous\" wording");
+        assert!(text.contains(NEW) && NEW.is_ascii(), "{name}: the prompt must be plain ASCII (no em dash — Windows consoles can garble it)");
     }
 }

@@ -438,6 +438,17 @@ fn write_settings(path: &Path, text: &str) -> Result<(), String> {
 }
 
 /// `olp-hook install …` / `olp-hook uninstall …`.
+/// Progress lines (owner ledger 1083·1085). Written to stderr and flushed at once, so the notice on stdout keeps its shape and the screen is never silent.
+/// The second line only when the rule check will start the PowerShell parser (rules::parser_rules > 0), so "a minute" is said only when it can be true.
+const PROGRESS_INSTALL: &str = "Installing OLP…";
+const PROGRESS_RULES: &str = "Checking your permission rules — this can take a minute…";
+
+fn progress(line: &str) {
+    let mut e = std::io::stderr().lock();
+    let _ = writeln!(e, "{line}");
+    let _ = e.flush();
+}
+
 pub fn run(cmd: &str, args: &[String], env: &InstallEnv) -> Result<String, String> {
     let (mut user, mut dry, mut replace) = (false, false, false);
     for a in args {
@@ -451,6 +462,9 @@ pub fn run(cmd: &str, args: &[String], env: &InstallEnv) -> Result<String, Strin
     // Running from the home folder without --user would edit the user-global settings, so refuse before doing anything (--dry-run too). uninstall is unaffected.
     if cmd == "install" && !user && same_file(&env.project, &env.home) {
         return Err(HOME_REFUSE.into());
+    }
+    if cmd == "install" && !dry {
+        progress(PROGRESS_INSTALL);
     }
     let base = if user { &env.home } else { &env.project };
     let settings = base.join(".claude").join("settings.json");
@@ -509,6 +523,9 @@ pub fn run(cmd: &str, args: &[String], env: &InstallEnv) -> Result<String, Strin
     if cmd == "install" {
         // Final install notes in one block: entries added (above), the three "what it does" lines, one permission-rule line, then the removal line.
         out.extend(DOES.iter().map(|s| s.to_string()));
+        if crate::rules::parser_rules(&env.project, &env.home) > 0 {
+            progress(PROGRESS_RULES);
+        }
         let s = crate::rules::scan(&env.project, &env.home);
         out.push(crate::rules::summary(&s.rules, s.unreadable));
         out.push(format!("undo: run the same command with uninstall instead of install (the backup stays in {})", dir.join("backup").display()));
