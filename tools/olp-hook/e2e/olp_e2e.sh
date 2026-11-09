@@ -81,6 +81,7 @@ run_hook() { # run_hook <project> <command string> <tool_name> <command for the 
   echo $(( $(now_ms) - t0 )) > "$OUT.ms"   # time taken by the hook call (ms)
 }
 decision() { node -e 'try{console.log(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).hookSpecificOutput.permissionDecision)}catch(e){console.log("none")}' "$OUT"; }
+reason_has() { node -e 'try{process.exit(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).hookSpecificOutput.permissionDecisionReason.includes(process.argv[2])?0:1)}catch(e){process.exit(1)}' "$OUT" "$1"; }
 is_card() { [ "$(cat "$OUT.code")" = "0" ] && [ "$(decision)" = "ask" ]; }
 card_within_10s() { is_card && [ "$(cat "$OUT.ms")" -lt "$CARD_LIMIT_MS" ]; }
 is_pass() { [ "$(cat "$OUT.code")" = "0" ] && [ ! -s "$OUT" ]; }
@@ -121,6 +122,13 @@ check "L1 등록된 명령의 실행 파일이 실제로 있음" cmd_file_exists
 # 1. run the registered command as is from a path with spaces and Korean characters
 run_hook "$P1" "$CMD" Bash "rm -rf build"
 check "1 삭제 -> 카드(ask) 10초 안, 공백·한글 경로 ($(cat "$OUT.ms")ms)" card_within_10s
+Q_CARD_DELETE=0; card_within_10s && reason_has "delete files" && Q_CARD_DELETE=1
+check "1 삭제 카드 글자에 'delete files'" test "$Q_CARD_DELETE" = "1"
+# overwrite card: redirecting into a committed file
+run_hook "$P1" "$CMD" Bash "echo x > README.md"
+Q_CARD_OVERWRITE=0; card_within_10s && reason_has "overwrite files" && Q_CARD_OVERWRITE=1
+check "1 덮어쓰기 -> 카드(ask) 10초 안, 글자에 'overwrite files' ($(cat "$OUT.ms")ms)" test "$Q_CARD_OVERWRITE" = "1"
+check "1 시험이 README.md 를 바꾸지 않음(셈만)" test "$(cat "$P1/README.md")" = "# x"
 run_hook "$P1" "$CMD" Bash "git status --short"
 read_check "1 읽기 -> 빈 출력·종료 0(통과)"
 check "1 .olp/hook-log.jsonl 에 줄이 쌓임(훅이 진짜 돎)" test -s "$P1/.olp/hook-log.jsonl"
@@ -250,5 +258,28 @@ check "8b 메시지가 있음" has_text "$ROOT/nohome.out"
 check "8b panic 문구 없음" no_panic "$ROOT/nohome.out"
 check "8b 설정 안 써짐" test ! -e "$P4/.claude/settings.json"
 
+# ---------- 11. uninstall the main project (npx), for the receipt ----------
+Q_HOOKS=$(( $(settings_info "$S1" count) + $(settings_info "$S1" post) ))
+( cd "$P1" && npx --no-install olp uninstall </dev/null >/dev/null 2>&1 ); Q_UNINSTALL=$?
+check "11 npx olp uninstall 종료 0" test "$Q_UNINSTALL" = "0"
+Q_HOOKS_AFTER=$(( $(settings_info "$S1" count) + $(settings_info "$S1" post) ))
+check "11 uninstall 뒤 우리 칸 0개" test "$Q_HOOKS_AFTER" = "0"
+
 echo "E2E $LABEL: $PASS PASS, $FAIL FAIL, $SKIP SKIP, $FACT FACT"
+
+# Receipt for the tag gate (DESIGN_RELEASE-QUAL-012 §2), only when OLP_E2E_QUAL names a file. Numbers are what this run saw.
+# hooks = our PreToolUse + PostToolUse entries after install (counted just before uninstall; installs since then left it unchanged, see 4).
+if [ -n "${OLP_E2E_QUAL:-}" ]; then
+  node -e '
+    const [out, key, inst, hooks, del, ow, un, after, fail, exe] = process.argv.slice(1);
+    const fs = require("fs"), crypto = require("crypto");
+    const counts = { install: +inst, hooks: +hooks, card_delete: +del, card_overwrite: +ow, uninstall: +un, hooks_after: +after };
+    const meets = counts.install === 0 && counts.hooks === 2 && counts.card_delete === 1 && counts.card_overwrite === 1 && counts.uninstall === 0 && counts.hooks_after === 0;
+    let sha = null; try { sha = crypto.createHash("sha256").update(fs.readFileSync(exe)).digest("hex"); } catch (e) {}
+    const q = { kind: "e2e", os: key, head_sha: process.env.GITHUB_SHA || null, run_id: process.env.GITHUB_RUN_ID ? +process.env.GITHUB_RUN_ID : null,
+      ok: meets && +fail === 0, counts, hook_sha256: sha, made_at: new Date().toISOString().replace(/\.\d+Z$/, "Z") };
+    fs.writeFileSync(out, JSON.stringify(q, null, 2) + "\n");
+    console.log("qual.json: " + JSON.stringify(q));
+  ' "$OLP_E2E_QUAL" "$KEY" "$INST_RC" "$Q_HOOKS" "$Q_CARD_DELETE" "$Q_CARD_OVERWRITE" "$Q_UNINSTALL" "$Q_HOOKS_AFTER" "$FAIL" "$P1/node_modules/@feedpia/olp-$KEY/bin/$EXE_NAME"
+fi
 [ "$FAIL" = "0" ]

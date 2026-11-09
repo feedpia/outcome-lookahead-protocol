@@ -193,7 +193,7 @@ pub fn run_hook(stdin: &[u8], project: Option<&Path>) -> HookOutcome {
         Err(why) => return blocked_error(Some(&project), why),
     };
     store::mark_run(&project);
-    let limits = Limits { counter: cfg.counter_limit() };
+    let limits = Limits { counter: cfg.counter_limit(), ps_parser: true };
     // Also include the project folder in the comparison set, so deletes of the project folder (settings location) or above are blocked even when the shell is outside the project (inside the decision thread only).
     let anchor = project.clone();
     let assessed = guarded(

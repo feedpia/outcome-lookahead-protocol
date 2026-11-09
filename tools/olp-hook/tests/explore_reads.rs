@@ -323,10 +323,9 @@ const R3B_WRITES: &[&str] = &[
     "sed -n '1w out.txt' build/notes.txt",
     "sed -n '1e rm -rf build' build/notes.txt",
     "sed -n 1p $F",
-    "sed -n '$p' build/notes.txt", // `$` inside quotes cannot be told from text alone = ask (fail closed)
+    // 0.1.2: `sed -n '$p'` and `sed -n -e 1p` moved to R012_READS (quote-aware: a single-quoted `$` cannot expand). `"$p"` and `$p` still ask (R012_WRITES).
     "sed -n 1p *.log",
     "sed s/a/b/ build/notes.txt",
-    "sed -n -e 1p build/notes.txt",
     "sed -n 1p build/notes.txt > out.txt",
     "/usr/bin/sed -n 1p build/notes.txt",
     "sort -o out.txt build/app.log",
@@ -405,5 +404,138 @@ fn m1_bare_names_still_pass() {
     for (tool, cmd) in [("Bash", "ls -la"), ("Bash", "ls.exe build"), ("Bash", "sudo ls"), ("Bash", "cat build/app.log"), ("PowerShell", "Get-ChildItem build"), ("PowerShell", "echo hi")] {
         let o = call(&tmp("m1ok"), tool, cmd);
         assert!(o.code == 0 && o.stdout.trim().is_empty(), "{tool}: {cmd} → {}", o.stdout);
+    }
+}
+
+// ---- 0.1.2: option-checked reads for sed `$`/`-e`, awk, git grep, git -C / -c ----
+// Principle (same as R3B): pass only when no form that can write or run a program is visible.
+// A `$` or glob outside quotes can expand into an option, so it still asks; inside single quotes it is plain text.
+
+const R012_READS: &[&str] = &[
+    "sed -n '$p' build/notes.txt",
+    "sed -n '1,$p' build/notes.txt",
+    "sed -n -e 1p build/notes.txt",
+    "sed -n -e '$p' -e 1p build/notes.txt",
+    "awk '{print $1}' build/app.log",
+    "awk -F: '{print $1}' build/app.log",
+    "awk -F ':' 'NR==2' build/app.log",
+    "awk -v n=2 'NR==n' build/app.log",
+    "ls build | awk '{print $NF}'",
+    "awk 'END{print NR}' build/app.log build/notes.txt",
+    "git grep -n foo",
+    "git grep -i foo -- build",
+    "git --no-pager grep foo",
+    "git -C build status",
+    "git -C build log --oneline -3",
+    "git -C build grep foo",
+    "git -c color.ui=never log -1",
+    "git -c core.quotepath=false status",
+    "git -C build -c color.ui=always diff --stat",
+    "awk -F: -v a=1 '{print $1}' build/app.log",
+    "git -C build -C . status",
+];
+
+#[test]
+fn r012_option_checked_reads_show_no_card() {
+    let mut bad = Vec::new();
+    for mode in ["default", "auto"] {
+        for cmd in R012_READS {
+            let o = call_mode(&tmp("r012read"), cmd, mode);
+            if o.code != 0 || !o.stdout.trim().is_empty() {
+                bad.push(format!("[{mode}] {cmd}\n  → code {} {}{}", o.code, o.stdout.trim(), o.stderr.trim()));
+            }
+        }
+    }
+    assert!(bad.is_empty(), "{} option-rule reads produced a card:\n{}", bad.len(), bad.join("\n"));
+}
+
+/// Write or run forms of the same names must always ask (bypass and dontAsk = exit 2).
+const R012_WRITES: &[&str] = &[
+    r#"sed -n "$p" build/notes.txt"#,
+    "sed -n $p build/notes.txt",
+    "sed -n -e 1p -i build/notes.txt",
+    "sed -n -e '1w out.txt' build/notes.txt",
+    "sed -n -e '$e rm -rf build' build/notes.txt",
+    "sed -n -e build/notes.txt",
+    "sed -n -e 1p -e '1w x' build/notes.txt",
+    "sed -n 1p -i build/notes.txt",
+    "sed -n 's/a/b/p' build/notes.txt",
+    r#"awk '{system("rm -rf build")}' build/app.log"#,
+    r#"awk '{print > "out.txt"}' build/app.log"#,
+    r#"awk '{print $1 >> "out.txt"}' build/app.log"#,
+    r#"awk '{print | "sh"}' build/app.log"#,
+    r#"awk 'BEGIN{"date" | getline d; print d}'"#,
+    "awk -f prog.awk build/app.log",
+    r#"awk 'BEGIN{getline l < "/inet/tcp/0/example.com/80"; print l}'"#,
+    "awk -dout.txt '{print}' build/app.log",
+    "awk -l rwarray '{print}' build/app.log",
+    "awk -i inplace '{print}' build/app.log",
+    r#"awk '@include "x.awk"' build/app.log"#,
+    r#"awk "{print $1}" build/app.log"#,
+    "awk -d '{print}' build/app.log",
+    "awk -o '{print}' build/app.log",
+    "awk -p '{print}' build/app.log",
+    "awk '{print }'$X build/app.log",
+    "awk -M '{print}' build/app.log",
+    "awk -E prog.awk build/app.log",
+    "awk -S '{print}' build/app.log",
+    "awk --pro '{print}' build/app.log",
+    "ls build | awk '{print $1}' > out.txt",
+    "awk -e '{print}' build/app.log",
+    "awk -W exec x build/app.log",
+    "awk --profile '{print}' build/app.log",
+    "awk '{print}' build/*.log",
+    "awk '{print}' build/app.log > out.txt",
+    "/usr/bin/awk '{print}' build/app.log",
+    "awk",
+    "git grep -O foo",
+    "git grep -Ovim foo",
+    "git grep -nO foo",
+    "git grep --open-files-in-pager foo",
+    "git grep --open foo",
+    "git grep --textconv foo",
+    "git grep --text foo",
+    "git grep --o foo",
+    "git grep --op foo",
+    "git grep --textc foo",
+    "git grep --ext-grep foo",
+    "git -C b* status",
+    "git -c core.pager=sh log",
+    "git -c alias.x=!sh x",
+    "git -c diff.external=sh diff",
+    "git -C build -c core.fsmonitor=sh status",
+    "git -c color.ui=$X log",
+    "git -C $D status",
+    "git -C build push --force",
+    "git -C build reset --hard",
+    "git -C build",
+    "git -c include.path=evil.cfg status",
+    "git --config-env=core.pager=X log",
+    "git -p log",
+    "git --exec-path=x status",
+];
+
+#[test]
+fn r012_write_forms_still_ask() {
+    let mut bad = Vec::new();
+    for cmd in R012_WRITES {
+        let o = call_mode(&tmp("r012w"), cmd, "auto");
+        if !o.stdout.contains("\"ask\"") || call_mode(&tmp("r012w"), cmd, "bypassPermissions").code != 2 || call_mode(&tmp("r012w"), cmd, "dontAsk").code != 2 {
+            bad.push(format!("{cmd}\n  → {}", o.stdout.trim()));
+        }
+    }
+    assert!(bad.is_empty(), "{} write forms did not ask:\n{}", bad.len(), bad.join("\n"));
+}
+
+/// A path-qualified name runs that file, so a «read_only» answer for the bare name does not cover it (review memo M1).
+#[test]
+fn r012_pathed_name_does_not_take_the_bare_name_answer() {
+    let p = tmp("r012m1");
+    olp_hook::classify_cli(&p, &["--bash".to_string(), "mytool".to_string(), "read_only".to_string()]).unwrap();
+    let bare = call_mode(&p, "mytool -l", "auto");
+    assert!(bare.code == 0 && bare.stdout.trim().is_empty(), "bare name keeps its answer: {}", bare.stdout);
+    for cmd in ["./mytool -l", "bin/mytool -l", "cd build && ../mytool -l"] {
+        let o = call_mode(&p, cmd, "auto");
+        assert!(o.stdout.contains("\"ask\""), "must ask: {cmd}\n{}", o.stdout);
     }
 }

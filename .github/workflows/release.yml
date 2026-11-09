@@ -60,8 +60,38 @@ jobs:
         shell: bash
         # --no-fail-fast: run every test binary (watch etc.) even after one fails; the job is still red.
         run: cargo test --manifest-path "${HOOK_DIR}/Cargo.toml" --locked --no-fail-fast --target "${{ matrix.target }}" -- ${{ matrix.threads }}
+      # Users' Windows PCs may run Git for Windows' (or MSYS2's) curl instead of the system one. It gives up on a closed port
+      # only after about 2 s, the session-start limit, which shipped a wrong "may still have arrived" in 0.1.1.
+      # Rust looks for a program in the test binary's own folder before System32 and PATH, so a copy there makes the signal
+      # tests use that curl. Its folder goes first on PATH so the DLLs it needs load. No such curl on the runner = red
+      # (skipping would claim a test that did not run). Same tests, second curl; no product change.
+      - name: 사용 신호 시험을 Git curl 로 한 번 더(Windows)
+        if: matrix.key == 'win32-x64' && matrix.test
+        shell: bash
+        run: |
+          found=""
+          for c in "/c/Program Files/Git/mingw64/bin/curl.exe" "/c/Program Files/Git/usr/bin/curl.exe" \
+                   "/c/msys64/mingw64/bin/curl.exe" "/c/msys64/ucrt64/bin/curl.exe" "/c/msys64/usr/bin/curl.exe"; do
+            if [ -f "$c" ]; then found="$c"; break; fi
+          done
+          if [ -z "$found" ]; then
+            echo "no Git or MSYS2 curl on this runner; folders:"
+            ls "/c/Program Files/Git" "/c/Program Files/Git/mingw64/bin" "/c/msys64" 2>&1 | head -60
+            exit 1
+          fi
+          echo "using $found"
+          export PATH="$(dirname "$found"):$PATH"
+          deps="${HOOK_DIR}/target/${{ matrix.target }}/debug/deps"
+          cp "$found" "$deps/curl.exe"
+          "$deps/curl.exe" --version | head -1
+          cargo test --manifest-path "${HOOK_DIR}/Cargo.toml" --locked --target "${{ matrix.target }}" --test usage -- ${{ matrix.threads }}
+          rm "$deps/curl.exe"
       - name: cargo build --release
         shell: bash
+        # Windows: the MSVC linker stamps a build time and a fresh PDB GUID into every exe (28 bytes), so two runs of the
+        # same source gave different sha256. /Brepro makes them fixed, so the exe the tag gate tested is the exe published.
+        env:
+          CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: "-C link-arg=/Brepro"
         run: cargo build --manifest-path "${HOOK_DIR}/Cargo.toml" --release --locked --target "${{ matrix.target }}"
       - name: 산출물 모으기 + sha256
         shell: bash
@@ -116,7 +146,11 @@ jobs:
           pack_one() { # pack_one <bin key> <name> <exe>
             local d="rel/stage-$2"; mkdir -p "$d"; cp "bins/bin-$1/$3" "$d/$3"; chmod +x "$d/$3"
             cp LICENSE "$d/" 2>/dev/null || true
-            if [ "$1" = win32-x64 ]; then (cd "$d" && zip -q -X "../../dist/olp-hook-$2.zip" *); else tar -C "$d" -czf "dist/olp-hook-$2.tar.gz" .; fi
+            # Same files -> same archive bytes in every run (the publish job compares them with the tag-gate SHA256SUMS):
+            # fixed file times, sorted names, no owner names, no gzip time stamp.
+            touch -d @1767225600 "$d" "$d"/*
+            if [ "$1" = win32-x64 ]; then (cd "$d" && zip -q -X -D "../../dist/olp-hook-$2.zip" $(ls | LC_ALL=C sort))
+            else tar --sort=name --mtime=@1767225600 --owner=0 --group=0 --numeric-owner -C "$d" -cf - . | gzip -9n > "dist/olp-hook-$2.tar.gz"; fi
           }
           pack_one win32-x64    windows-x64 olp-hook.exe
           pack_one linux-x64    linux-x64   olp-hook
@@ -125,12 +159,68 @@ jobs:
           pack_one darwin-x64   macos-x64   olp-hook
           cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS
           for f in olp-hook-windows-x64.zip olp-hook-linux-x64.tar.gz olp-hook-linux-arm64.tar.gz olp-hook-macos-arm64.tar.gz olp-hook-macos-x64.tar.gz; do grep -q " $f\$" SHA256SUMS || { echo "SHA256SUMS 에 $f 없음"; exit 1; }; done
+      # Tests for the publish job's byte check (fake dist folders; no network).
+      - name: 게시 전 바이트 대조 시험(verify_dist.sh)
+        shell: bash
+        run: bash tools/olp-hook/qual/test_verify_dist.sh
+      # The check itself on this run's real dist with a matching message: must pass, or the tag run would stop.
+      - name: 게시 전 바이트 대조 — 이 실행 dist 로 한 번
+        shell: bash
+        run: |
+          { echo "SHA256SUMS:"; cat dist/SHA256SUMS; } > "${RUNNER_TEMP}/tagmsg"
+          bash tools/olp-hook/qual/verify_dist.sh dist "${RUNNER_TEMP}/tagmsg"
       - uses: actions/upload-artifact@v4
         with:
           name: dist
           path: dist/
           if-no-files-found: error
           retention-days: 7
+
+  # Chaos: 78 broken or hostile inputs straight into the built hook binary, on all 5 platforms.
+  # Pass = no panic, exit 0 or 2 only, and no delete/overwrite input passes silently. Receipt = artifact qual-chaos-<os>/qual.json.
+  chaos:
+    name: chaos ${{ matrix.key }} (78 broken inputs)
+    needs: build
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { key: win32-x64,    os: windows-latest,   exe: olp-hook.exe }
+          - { key: darwin-arm64, os: macos-latest,     exe: olp-hook }
+          - { key: darwin-x64,   os: macos-15-intel,   exe: olp-hook }
+          - { key: linux-x64,    os: ubuntu-latest,    exe: olp-hook }
+          - { key: linux-arm64,  os: ubuntu-24.04-arm, exe: olp-hook }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - uses: actions/download-artifact@v4
+        with:
+          name: bin-${{ matrix.key }}
+          path: bin
+      - name: 78칸 돌리기(가짜 홈 안에서만)
+        shell: bash
+        env:
+          PYTHONIOENCODING: utf-8
+        run: |
+          # Fixed scratch home, the same short path the t7c job uses; nothing touches the runner's real home.
+          if [ "$RUNNER_OS" = "Windows" ]; then B='C:/t7c'; mkdir -p /c/t7c/home; else B=/tmp/t7c; mkdir -p /tmp/t7c/home; fi
+          export HOME="$B/home" USERPROFILE="$B/home"
+          case "$HOME" in "$B"/*) ;; *) echo "::error::HOME is outside $B"; exit 1;; esac
+          chmod +x "bin/${{ matrix.exe }}"   # download-artifact v4 drops the executable bit
+          python -I -m unittest discover -s tools/olp-hook/chaos -p "test_*.py"
+          python -I tools/olp-hook/chaos/chaos.py --hook "bin/${{ matrix.exe }}" --out chaos-out/qual.json --os ${{ matrix.key }} --work "$B/chaos-work"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: qual-chaos-${{ matrix.key }}
+          path: chaos-out/qual.json
+          if-no-files-found: error
+          retention-days: 90
 
   e2e:
     name: e2e ${{ matrix.key }}
@@ -157,7 +247,17 @@ jobs:
           path: dist
       - name: 설치 끝에서 끝까지 시험(npm 설치 -> olp install -> 훅 실행 + 혼돈 사례)
         shell: bash
+        env:
+          OLP_E2E_QUAL: ${{ github.workspace }}/qual.json
         run: bash tools/olp-hook/e2e/olp_e2e.sh "$GITHUB_WORKSPACE/dist" ${{ matrix.key }}
+      # Tag-gate receipt (DESIGN_RELEASE-QUAL-012 §2): uploaded even when the run fails, so the gate reads ok=false instead of a missing file.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: qual-e2e-${{ matrix.key }}
+          path: qual.json
+          if-no-files-found: error
+          retention-days: 90
 
   # L2: does real Claude Code (claude -p) actually call the registered hook. Runs only when credentials exist. Model = haiku (cheapest).
   # Without credentials it ends with one «skipped» line (green). Publishing does not wait for this job. --bare is not used because it skips hooks.
@@ -417,6 +517,88 @@ jobs:
 
   # Unfamiliar environments — Node versions, slow first start, minimal container. No macOS jobs here (macOS minutes cost ×10).
   # Fails when a delete is not a card within 10 s, hangs or crashes. A prompt on a read-only command in a slow job is recorded as a FACT line.
+  # T7-c: real interactive Claude Code on 5 runners measures the session-start signal (hook time, send after hook exit, curl gone).
+  # Practice branches only (not tags); does not block publishing. Receipt = artifact qual-t7c-<os>/qual.json for the release gate.
+  # Numbers go only to a local silent server: the production host is blocked in the hosts file and the script checks the record endpoint.
+  t7c:
+    name: t7c ${{ matrix.key }} (real Claude Code session, signal does not delay start)
+    needs: pack
+    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { key: win32-x64,    os: windows-latest }
+          - { key: darwin-arm64, os: macos-latest }
+          - { key: darwin-x64,   os: macos-15-intel }
+          - { key: linux-x64,    os: ubuntu-latest }
+          - { key: linux-arm64,  os: ubuntu-24.04-arm }
+    env:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22.x' }
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: 토큰 확인(rc 갈래에서는 없으면 실패)
+        id: tok
+        shell: bash
+        run: |
+          if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then echo "have=1" >> "$GITHUB_OUTPUT"; exit 0; fi
+          echo "have=0" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_REF" = "refs/heads/ci/olp-012-rc" ]; then echo "::error::CLAUDE_CODE_OAUTH_TOKEN missing on the release-candidate branch"; exit 1; fi
+          echo "::warning title=t7c skipped::CLAUDE_CODE_OAUTH_TOKEN missing - skipped is not a pass"
+      - name: 운영 서버 막기(hosts) · 가짜 홈
+        if: steps.tok.outputs.have == '1'
+        shell: bash
+        run: |
+          H=$(node -e 'console.log(new URL(require("./tools/olp-hook/data/hook-config.default.json").signal_endpoint).hostname)')
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            echo "0.0.0.0 $H" >> /c/Windows/System32/drivers/etc/hosts; B='C:/t7c'; mkdir -p /c/t7c/home
+          else
+            echo "0.0.0.0 $H" | sudo tee -a /etc/hosts >/dev/null; B=/tmp/t7c; mkdir -p /tmp/t7c/home
+          fi
+          echo "blocked $H"
+          echo "T7C_BASE=$B" >> "$GITHUB_ENV"
+      - name: 도구(러너 안에서만) — claude · pywinpty
+        if: steps.tok.outputs.have == '1'
+        shell: bash
+        run: |
+          npm install -g @anthropic-ai/claude-code >/dev/null 2>&1 && claude --version
+          if [ "$RUNNER_OS" = "Windows" ]; then python -m pip install -q pywinpty; where curl; else command -v curl; fi
+      - name: 재기(후보 3번 + claude -p 1번 + 대조 0.1.1 1번)
+        if: steps.tok.outputs.have == '1'
+        timeout-minutes: 25
+        shell: bash
+        env:
+          PYTHONIOENCODING: utf-8
+          PYTHONUTF8: '1'
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then export HOME='C:/t7c/home' USERPROFILE='C:/t7c/home'; else export HOME=/tmp/t7c/home; fi
+          python tools/olp-hook/e2e/rec/t7c_measure.py run --os ${{ matrix.key }} --dist "$GITHUB_WORKSPACE/dist" --out "$GITHUB_WORKSPACE/t7c-out"
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.tok.outputs.have == '1'
+        with:
+          name: qual-t7c-${{ matrix.key }}
+          path: t7c-out/qual.json
+          if-no-files-found: ignore
+          retention-days: 90
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.tok.outputs.have == '1'
+        with:
+          name: t7c-rec-${{ matrix.key }}
+          path: t7c-out/*.cast
+          if-no-files-found: ignore
+
   e2e-env:
     name: e2e env ${{ matrix.label }}
     needs: pack
@@ -481,8 +663,9 @@ jobs:
 
   publish:
     name: npm 게시 + 릴리스 초안 (태그만)
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [pack, e2e]
+    # Publish only from the public repository's v* tags (tag gate: tags go to the public repo via kx_tag_gate.sh, never to the private repo).
+    if: github.repository == 'feedpia/outcome-lookahead-protocol' && startsWith(github.ref, 'refs/tags/v')
+    needs: [pack, e2e, chaos]   # chaos also runs on the tag run itself (second safety net after the tag gate)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -494,23 +677,97 @@ jobs:
         with:
           name: dist
           path: dist
+      # The tag gate puts the release candidate's SHA256SUMS in the annotated tag message. Stop before npm publish
+      # if this run's rebuilt files differ (Windows bytes, runner image change) or the tag carries no such block.
+      - name: 게시 전 바이트 대조(태그 메시지 SHA256SUMS == 이 실행 dist)
+        shell: bash
+        run: |
+          git fetch --force --depth=1 origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
+          [ "$(git cat-file -t "refs/tags/${GITHUB_REF_NAME}")" = tag ] || { echo "::error::${GITHUB_REF_NAME} is not an annotated tag (no tag-gate SHA256SUMS)"; exit 1; }
+          [ "$(git rev-parse "refs/tags/${GITHUB_REF_NAME}^{commit}")" = "${GITHUB_SHA}" ] || { echo "::error::tag ${GITHUB_REF_NAME} now points to another commit than this run (${GITHUB_SHA})"; exit 1; }
+          git for-each-ref --format='%(contents)' "refs/tags/${GITHUB_REF_NAME}" > "${RUNNER_TEMP}/tagmsg"
+          bash tools/olp-hook/qual/verify_dist.sh dist "${RUNNER_TEMP}/tagmsg"
       - uses: actions/setup-node@v4
         with:
           node-version: '24.x'
           registry-url: 'https://registry.npmjs.org'
       - name: npm ≥ 11.5.1(신뢰 게시 조건)
-        run: npm install -g npm@11 && npm --version
-      - name: 게시 — 운영체제별 4개 먼저, 본 패키지 마지막
+        shell: bash
+        run: |
+          npm install -g npm@11
+          v=$(npm --version); echo "npm $v"
+          node -e 'const [a,b,c]=process.argv[1].split(".").map(Number);process.exit(a>11||(a===11&&(b>5||(b===5&&c>=1)))?0:1)' "$v" || { echo "::error::npm $v < 11.5.1 — trusted publishing would fail"; exit 1; }
+      - name: 게시 — 운영체제별 5개 먼저, 본 패키지 마지막
         shell: bash
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }} # first release only; removed after switching to trusted publishing
+          # Trusted publishing (OIDC, no token). Rollback only: set repo variable OLP_NPM_TOKEN_FALLBACK=1 and a fresh NPM_TOKEN secret.
+          NODE_AUTH_TOKEN: ${{ vars.OLP_NPM_TOKEN_FALLBACK == '1' && secrets.NPM_TOKEN || '' }}
         run: |
           cd dist
           for p in feedpia-olp-win32-x64 feedpia-olp-darwin-arm64 feedpia-olp-darwin-x64 feedpia-olp-linux-x64 feedpia-olp-linux-arm64 feedpia-olp-0; do
-            f=$(ls ${p}*.tgz | head -1); echo "publish $f"
+            f=$(ls ${p}*.tgz | head -1)
+            nv=$(tar -xOzf "$f" package/package.json | node -e 'const p=JSON.parse(require("fs").readFileSync(0,"utf8"));console.log(p.name+"@"+p.version)')
+            # A re-run after a partial failure skips versions already on npm (a published version can never be reused).
+            if npm view "$nv" version >/dev/null 2>&1; then echo "skip $nv (already published)"; continue; fi
+            echo "publish $f ($nv)"
             npm publish "$f" --provenance --access public
           done
       - name: GitHub release draft (publish by hand)
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "${GITHUB_REF_NAME}" dist/olp-hook-*.zip dist/olp-hook-*.tar.gz dist/SHA256SUMS --verify-tag --draft --title "${GITHUB_REF_NAME}" # draft → public = by hand
+
+  # H9: right after publishing, install the just-published version from the real npm registry on 5 clean runners,
+  # then uninstall. On a ci/olp-* branch (no publish) it checks the latest version already on npm. Publishes nothing.
+  h9:
+    name: H9 real npm ${{ matrix.key }} (게시 뒤 설치·지우기)
+    needs: [publish]
+    if: ${{ always() && (needs.publish.result == 'success' || (needs.publish.result == 'skipped' && !startsWith(github.ref, 'refs/tags/'))) }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { key: win32-x64,    os: windows-latest }
+          - { key: darwin-arm64, os: macos-latest }
+          - { key: darwin-x64,   os: macos-15-intel }
+          - { key: linux-x64,    os: ubuntu-latest }
+          - { key: linux-arm64,  os: ubuntu-24.04-arm }
+    steps:
+      - uses: actions/setup-node@v4
+        with: { node-version: '22.x' }
+      - name: 판 고르기 · npm 에 보일 때까지 기다림(최대 10분)
+        id: ver
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then V="${GITHUB_REF_NAME#v}"; else V=$(npm view @feedpia/olp version); fi
+          echo "v=$V" >> "$GITHUB_OUTPUT"; echo "판 $V"
+          for i in $(seq 1 20); do
+            ok=1
+            for p in olp olp-${{ matrix.key }}; do [ "$(npm view @feedpia/$p@$V version 2>/dev/null)" = "$V" ] || ok=0; done
+            [ $ok = 1 ] && break; echo "아직 안 보임($i/20) — 30초 뒤 다시"; sleep 30
+          done
+          [ $ok = 1 ] || { echo "::error::@feedpia/olp@$V 가 10분 안에 npm 에 안 보임"; exit 1; }
+          for p in olp olp-${{ matrix.key }}; do
+            pt=$(npm view @feedpia/$p@$V dist.attestations.provenance.predicateType 2>/dev/null)
+            echo "@feedpia/$p@$V provenance=$pt"
+            [ "$pt" = "https://slsa.dev/provenance/v1" ] || { echo "::error::@feedpia/$p@$V has no SLSA provenance"; exit 1; }
+          done
+      - name: npx 설치 → 훅 2 → 지우기 → 훅 0 (깨끗한 폴더)
+        shell: bash
+        run: |
+          set +e -u   # record each exit code instead of stopping at the first failure
+          V="${{ steps.ver.outputs.v }}"
+          P="$RUNNER_TEMP/proj"; mkdir -p "$P" && cd "$P" && git init -q
+          cnt() { node -e 'const fs=require("fs");let n=0;try{const s=JSON.parse(fs.readFileSync(".claude/settings.json","utf8"));for(const k of Object.keys(s.hooks||{}))for(const g of s.hooks[k])for(const h of (g.hooks||[]))if(/olp-hook/.test(h.command||""))n++}catch(e){}console.log(n)'; }
+          npx -y @feedpia/olp@$V install </dev/null; a=$?; n1=$(cnt)
+          cmd=$(node -e 'const s=require("./.claude/settings.json");console.log(s.hooks.PreToolUse[0].hooks[0].command)' 2>/dev/null || true)
+          bin=$(node -e 'const c=process.argv[1];const m=c.match(/^"([^"]+)"/)||c.match(/^(\S+)/);console.log(m?m[1]:"")' "$cmd")
+          [ -n "$bin" ] && [ -e "$bin" ] && e=yes || e=no
+          npx -y @feedpia/olp@$V uninstall </dev/null; b=$?; n2=$(cnt)
+          line="${{ matrix.key }} v$V install=$a hooks=$n1 binary_exists=$e uninstall=$b hooks_after=$n2"
+          echo "$line"; echo "- $line" >> "$GITHUB_STEP_SUMMARY"
+          [ "$a" = 0 ] && [ "$n1" = 2 ] && [ "$e" = yes ] && [ "$b" = 0 ] && [ "$n2" = 0 ]
