@@ -8,7 +8,7 @@ use olp_hook::store::DeviceMap;
 use std::path::Path;
 
 fn run(c: &str) -> Assessment {
-    assess("PowerShell", &serde_json::json!({ "command": c }), &DeviceMap::default(), Path::new("."), Limits { counter: None })
+    assess("PowerShell", &serde_json::json!({ "command": c }), &DeviceMap::default(), Path::new("."), Limits { counter: None, ps_parser: true })
 }
 
 /// Fallback side (parser unavailable or slow start) = built-in list: treated as a write (no read pass, effect unknown), no candidates, and the card shows only "Not classified yet" (no classify lines).

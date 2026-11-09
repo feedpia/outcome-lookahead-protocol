@@ -144,3 +144,156 @@ fn install_ends_with_one_summary_card() {
     let un = run("uninstall", &[], &env).unwrap();
     assert!(!un.contains("What OLP does now") && !un.contains("Permission rules"), "{un}");
 }
+
+// ---- Install progress (DESIGN_INSTALL_PROGRESS_012, owner ledger 1083-1085): the rule check used to start powershell.exe twice per PowerShell rule with no output (owner PC: 83 rules = 82 s).
+mod common;
+
+const SHORT: &str = "Installing OLP…";
+const LONG: &str = "Checking your permission rules — this can take a minute…";
+
+fn bin(p: &Path, h: &Path, args: &[&str]) -> std::process::Output {
+    std::process::Command::new(env!("CARGO_BIN_EXE_olp-hook"))
+        .args(args)
+        .env("CLAUDE_PROJECT_DIR", p)
+        .env("HOME", h)
+        .env("USERPROFILE", h)
+        .env_remove("OLP_HOOK_SIGNAL")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap()
+}
+
+fn prog_env(p: &Path, h: &Path) -> InstallEnv {
+    let prog = p.join(format!("olp-hook{}", std::env::consts::EXE_SUFFIX));
+    std::fs::write(&prog, b"hook-bytes").unwrap();
+    InstallEnv {
+        project: p.to_path_buf(),
+        home: h.to_path_buf(),
+        exe: prog,
+        now: 7,
+    }
+}
+
+/// T1: the short line goes to stderr first on a real install only; the notice on stdout is unchanged; no long line without rules that need the parser.
+#[test]
+fn t1_install_says_installing_first_on_stderr() {
+    let (p, h) = tmp("t1_progress");
+    let o = bin(&p, &h, &["install"]);
+    let (out, err) = (
+        String::from_utf8_lossy(&o.stdout),
+        String::from_utf8_lossy(&o.stderr),
+    );
+    assert_eq!(o.status.code(), Some(0), "{err}");
+    assert!(
+        err.starts_with(&format!("{SHORT}\n")) || err.starts_with(&format!("{SHORT}\r\n")),
+        "stderr: {err:?}"
+    );
+    assert!(
+        !err.contains(LONG),
+        "no rule needs the parser, so no long line: {err:?}"
+    );
+    assert!(
+        out.contains("Permission rules:") && !out.contains(SHORT),
+        "stdout: {out}"
+    );
+    for a in [&["install", "--dry-run"][..], &["uninstall"][..]] {
+        let e = String::from_utf8_lossy(&bin(&p, &h, a).stderr).to_string();
+        assert!(
+            !e.contains(SHORT) && !e.contains(LONG),
+            "{a:?} prints no progress line: {e:?}"
+        );
+    }
+}
+
+/// T2: 83 command-name PowerShell rules (synthetic, the owner's count) are checked without starting powershell.exe per rule.
+#[test]
+fn t2_many_powershell_rules_install_quickly() {
+    let (p, h) = tmp("t2_many");
+    let many: Vec<String> = (0..83)
+        .map(|i| format!("PowerShell(tool{i} D:/x/*)"))
+        .collect();
+    allow(
+        &h.join(".claude/settings.json"),
+        &many.iter().map(String::as_str).collect::<Vec<_>>(),
+    );
+    let env = prog_env(&p, &h);
+    let t = std::time::Instant::now();
+    run("install", &[], &env).unwrap();
+    let s = t.elapsed().as_secs_f64();
+    assert!(
+        s < 3.0,
+        "install with 83 PowerShell rules took {s:.1} s (owner PC before the fix: 82 s)"
+    );
+}
+
+/// Rules whose prefix is an expression ([type]::Method, $var.Method(), (...)) where only the PowerShell parser finds the delete.
+const EXPR_RULES: [&str; 2] = [
+    "PowerShell([IO.File]::Delete('a'); *)",
+    "PowerShell($f.Delete(); *)",
+];
+const MIXED: [&str; 10] = [
+    "PowerShell(Remove-Item:*)",
+    "PowerShell(Get-ChildItem:*)",
+    "PowerShell(mytool D:/x/*)",
+    "PowerShell(pwsh -File D:/k/kx_*.ps1 *)",
+    "PowerShell(git push *)",
+    "PowerShell(& 'D:/k/kx_*.ps1' *)",
+    "PowerShell(& { Remove-Item a } *)",
+    "Bash(rm:*)",
+    "Bash(ls:*)",
+    "mcp__*",
+];
+
+/// T3 (review C1): turning the parser off for command-name rules must not lower the count. Numbers measured on the code before the fix:
+/// MIXED = 5 broad with the parser on and off; each expression rule = 1 with the parser, 0 without (non-Windows or parser did not start).
+#[test]
+fn t3_broad_count_unchanged_with_expression_rules() {
+    let (p, h) = tmp("t3_mixed");
+    allow(&h.join(".claude/settings.json"), &MIXED);
+    assert_eq!(
+        rules::scan(&p, &h).rules.len(),
+        5,
+        "command-name rules: same count as before the fix"
+    );
+    for r in EXPR_RULES {
+        let (p, h) = tmp("t3_expr");
+        allow(&h.join(".claude/settings.json"), &[r]);
+        common::require_ps_parser_or_env_fallback(
+            r,
+            || rules::scan(&p, &h).rules.len(),
+            |n| *n == 1,
+            |n| *n == 0,
+        );
+    }
+}
+
+/// T4 (review C2): the long line is true only when a rule will really go through the parser (expression prefix, parser available).
+#[test]
+fn t4_long_line_only_for_rules_that_need_the_parser() {
+    let (p, h) = tmp("t4_cmdlet");
+    let names: Vec<&str> = MIXED.iter().copied().filter(|r| !r.contains('{')).collect(); // `& { … }` is a script block = expression
+    allow(&h.join(".claude/settings.json"), &names);
+    assert_eq!(
+        rules::parser_rules(&p, &h),
+        0,
+        "command-name rules never start the parser"
+    );
+    assert!(!String::from_utf8_lossy(&bin(&p, &h, &["install"]).stderr).contains(LONG));
+    let (p, h) = tmp("t4_expr");
+    allow(&p.join(".claude/settings.local.json"), &[EXPR_RULES[0]]);
+    // Through the shared gate: with the parser available the long line must follow the short one; without it (non-Windows / off) no long line.
+    let probe = || {
+        let err = String::from_utf8_lossy(&bin(&p, &h, &["install"]).stderr).to_string();
+        let order = match (err.find(SHORT), err.find(LONG)) {
+            (Some(a), Some(b)) => a < b,
+            _ => false,
+        };
+        (rules::parser_rules(&p, &h), err.contains(LONG), order)
+    };
+    common::require_ps_parser_or_env_fallback(
+        "t4 long line",
+        probe,
+        |v| *v == (1, true, true),
+        |v| *v == (0, false, false),
+    );
+}

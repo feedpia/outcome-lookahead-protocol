@@ -587,7 +587,7 @@ fn counter_deadline_shared_across_findings() {
     let cmd = ["git reset --hard"; 12].join("; ");
     let map = olp_hook::store::load_map(&p).unwrap();
     let t0 = std::time::Instant::now();
-    let a = assess_bash(&cmd, &map, &p, Limits { counter: Some(limit) });
+    let a = assess_bash(&cmd, &map, &p, Limits { counter: Some(limit), ps_parser: true });
     let took = t0.elapsed();
     assert_eq!(a.findings.len(), 12);
     assert!(took <= limit + Duration::from_millis(150), "total counting {took:?} > limit {limit:?}");

@@ -2,7 +2,7 @@
   "quiet": false,
   "counter_timeout_ms": 3000,
   "hook_budget_ms": 5000,
-  "signal_timeout_s": 2,
+  "signal_timeout_s": 5,
   "signal_manual_timeout_s": 5,
   "signal_endpoint": "https://olp.feedpia.com/v1/olp/signal"
 }

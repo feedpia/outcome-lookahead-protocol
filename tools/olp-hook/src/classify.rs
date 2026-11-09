@@ -189,6 +189,8 @@ const PS_DELETE_VERBS: &[&str] = &["remove-item", "ri", "rm", "rmdir", "rd", "de
 #[derive(Debug, Clone, Copy)]
 pub struct Limits {
     pub counter: Option<Duration>,
+    /// Whether the PowerShell syntax parser may be started (hook: true). The install-time rule check passes false for command-name rules (one powershell.exe per rule was 82 s on the owner PC).
+    pub ps_parser: bool,
 }
 
 /// Group key: first word (path and .exe stripped, lowercase) + subcommand (letters, digits, `-_:` only, not a flag).
@@ -261,7 +263,8 @@ pub fn family_refused(family: &str) -> bool {
     DELETE_VERBS.contains(&w0) || OVERWRITE_VERBS.contains(&w0) || w0 == "olp-hook"
 }
 
-fn is_read_segment(words: &[String], ps: bool) -> bool {
+/// `safe[i]` = word i cannot expand into other text (no unquoted `$`, glob, `~` or brace). Same length as `words`; missing = not safe.
+fn is_read_segment(words: &[String], safe: &[bool], ps: bool) -> bool {
     let Some(w0) = words.first() else { return true };
     // A name with a path (`./ls`, `bin/cat`, `.\echo`, `C:\x\ls.exe`) runs that file, not a PATH tool, so it is never a read name (it cannot be verified as the real tool).
     if pathed(w0) {
@@ -273,10 +276,13 @@ fn is_read_segment(words: &[String], ps: bool) -> bool {
         return true;
     }
     let rest = &words[1..];
-    // Bash names whose read status depends on options: bare word only, and only when all arguments are literal text with no expansion.
-    if !ps && rest.iter().all(|a| plain_arg(a)) {
+    let arg_safe = |i: usize| plain_arg(&rest[i]) || safe.get(i + 1).copied().unwrap_or(false);
+    // Bash names whose read status depends on options: bare word only, and only when every argument is text that cannot expand
+    // (no variable, glob, `~` or brace outside quotes; inside single quotes `$` is plain text, so `'$p'` and `'{print $1}'` qualify).
+    if !ps && (0..rest.len()).all(arg_safe) {
         match w0.as_str() {
             "sed" => return sed_print_only(rest),
+            "awk" | "gawk" | "mawk" => return awk_no_output(rest),
             "sort" => return sort_no_output(rest),
             "uniq" => return uniq_no_output(rest),
             "date" => return date_no_set(rest),
@@ -286,26 +292,62 @@ fn is_read_segment(words: &[String], ps: bool) -> bool {
     match c.as_str() {
         "rg" => !rest.iter().any(|a| a.starts_with("--pre")),
         "find" => !rest.iter().any(|a| FIND_WRITE_OPTS.contains(&a.as_str())),
-        "git" if rest.len() == 1 && rest[0] == "--version" => true,
-        // A leading `--no-pager` only disables the pager, so the verdict follows the subcommand after it.
-        "git" if rest.first().is_some_and(|a| a == "--no-pager") => is_read_segment(&words_without_no_pager(words), ps),
-        "git" => match rest.first() {
-            // git global options (-c, -C, --exec-path, etc.) can launch programs via configuration, so they are outside the read list.
-            Some(sub) if !sub.starts_with('-') => {
-                GIT_READ_SUBS.contains(&sub.as_str())
-                    && !rest.iter().any(|a| a.starts_with("--output"))
-                    // cat-file --textconv and --filters launch a program named in repository config.
-                    && !(sub == "cat-file" && rest.iter().any(|a| a.starts_with("--textconv") || a.starts_with("--filters")))
-            }
-            _ => false,
-        },
+        "git" => git_read(rest, arg_safe),
         _ => READ_CMDS.contains(&c.as_str()),
     }
 }
 
-/// `git --no-pager <rest>` -> `git <rest>`.
-fn words_without_no_pager(words: &[String]) -> Vec<String> {
-    words.iter().enumerate().filter(|(i, _)| *i != 1).map(|(_, w)| w.clone()).collect()
+/// `git [global options] <sub> <args>`: a read only for a read subcommand after these global options:
+/// `--no-pager` (only turns the pager off), `-C <folder>` (only changes folder), `-c <key>=<value>` for output-format keys only
+/// (`color.*`, `core.quotepath`). Every other global option and config key can name a program (`core.pager`, `alias.*`,
+/// `diff.external`, `core.fsmonitor`, `--exec-path` ...), so it asks. `safe(i)` = argument i cannot expand.
+fn git_read(rest: &[String], safe: impl Fn(usize) -> bool) -> bool {
+    if rest.len() == 1 && rest[0] == "--version" {
+        return true;
+    }
+    let mut j = 0;
+    loop {
+        match rest.get(j).map(String::as_str) {
+            Some("--no-pager") => j += 1,
+            Some("-C") => match rest.get(j + 1) {
+                Some(d) if safe(j + 1) && !d.starts_with('-') => j += 2,
+                _ => return false,
+            },
+            Some("-c") => match rest.get(j + 1) {
+                Some(kv) if safe(j + 1) => {
+                    let key = kv.split('=').next().unwrap_or("").to_ascii_lowercase();
+                    if !(key.starts_with("color.") || key == "core.quotepath") {
+                        return false;
+                    }
+                    j += 2;
+                }
+                _ => return false,
+            },
+            _ => break,
+        }
+    }
+    let Some(sub) = rest.get(j).filter(|s| !s.starts_with('-')) else { return false };
+    let args = &rest[j + 1..];
+    if sub == "grep" {
+        return git_grep_no_program(args);
+    }
+    GIT_READ_SUBS.contains(&sub.as_str())
+        && !args.iter().any(|a| a.starts_with("--output"))
+        // cat-file --textconv and --filters launch a program named in repository config.
+        && !(sub == "cat-file" && args.iter().any(|a| a.starts_with("--textconv") || a.starts_with("--filters")))
+}
+
+/// `git grep` runs a program only through `-O`/`--open-files-in-pager` (any bundle such as `-nO`, `-Ovim`) or `--textconv`
+/// (and the removed `--ext-grep`). git accepts unique prefixes of long options, so any prefix of those names asks too
+/// (that also catches `--text`; fails closed).
+fn git_grep_no_program(args: &[String]) -> bool {
+    args.iter().all(|a| match a.strip_prefix("--") {
+        Some(long) => {
+            let name = long.split('=').next().unwrap_or("");
+            name.is_empty() || !["open-files-in-pager", "textconv", "ext-grep"].iter().any(|n| n.starts_with(name))
+        }
+        None => !(a.starts_with('-') && a.len() > 1 && a[1..].contains('O')),
+    })
 }
 
 /// Where the command starts in `timeout [options] <duration> command...`. None if the shape does not match (timeout is not stripped, so not a read).
@@ -331,19 +373,60 @@ fn plain_arg(a: &str) -> bool {
 }
 
 /// Only `sed -n '<line number>p|q[;...]' [files...]` is a read. The script contains only digits, `,`, `;`, p and q, so w, W, e, r cannot appear.
-/// A trailing `$` line address is treated by plain_arg as expansion text and rejected (even in quotes, so it asks; fails closed).
+/// A single-quoted `$` is the plain last-line address; an unquoted or double-quoted `$` can expand, so it asks (the caller's safe check).
 /// GNU sed also reads options after the file (`sed -n 1p f -i`), so any `-`-prefixed argument other than `-n` anywhere is a no.
+/// Also `sed -n -e '<script>' [-e '<script>' ...] [files...]`, and the last-line address `$` when it cannot expand (single-quoted).
 fn sed_print_only(rest: &[String]) -> bool {
-    let [n, script, files @ ..] = rest else { return false };
     let cmd_ok = |c: &str| {
         let Some(addr) = c.strip_suffix(['p', 'q']) else { return false };
-        let one = |x: &str| !x.is_empty() && x.chars().all(|d| d.is_ascii_digit());
+        let one = |x: &str| x == "$" || (!x.is_empty() && x.chars().all(|d| d.is_ascii_digit()));
         match addr.split_once(',') {
             Some((a, b)) => one(a) && one(b),
             None => one(addr),
         }
     };
-    n == "-n" && script.trim_end_matches(';').split(';').all(cmd_ok) && !files.iter().any(|f| f.starts_with('-'))
+    let script_ok = |s: &str| s.trim_end_matches(';').split(';').all(cmd_ok);
+    let Some((n, after)) = rest.split_first() else { return false };
+    if n != "-n" {
+        return false;
+    }
+    let mut i = 0;
+    while after.get(i).is_some_and(|a| a == "-e") {
+        match after.get(i + 1) {
+            Some(s) if script_ok(s) => i += 2,
+            _ => return false,
+        }
+    }
+    if i == 0 {
+        match after.first() {
+            Some(s) if script_ok(s) => i = 1,
+            _ => return false,
+        }
+    }
+    !after[i..].iter().any(|f| f.starts_with('-'))
+}
+
+/// `awk [-F sep] [-v name=value] '<program>' [files or name=value ...]` is a read only when the program text has no
+/// `system`, `>`, `|` (output redirection, pipes, `cmd | getline`) or `@` (gawk `@include`/`@load`). Every other option
+/// asks: `-f`/`-e`/`-i`/`-l` load code, `-d`/`-o`/`-p` write files, `-W`/`-E`/`-M`/`-D` and all long options are outside the list.
+/// `||` and comparisons like `NR>2` also ask (fails closed). Operands that start with `-` (other than `-` = stdin) ask.
+/// Sources: logs/design/OLP-0.1.2/RESEARCH_read_rules.md (gawk/mawk/BusyBox/POSIX manuals).
+fn awk_no_output(rest: &[String]) -> bool {
+    let mut i = 0;
+    while let Some(a) = rest.get(i).filter(|a| a.starts_with('-')) {
+        match a.as_str() {
+            "--" => {
+                i += 1;
+                break;
+            }
+            "-F" | "-v" if rest.get(i + 1).is_some() => i += 2,
+            _ if a.len() > 2 && (a.starts_with("-F") || a.starts_with("-v")) => i += 1,
+            _ => return false,
+        }
+    }
+    let Some(program) = rest.get(i) else { return false };
+    // gawk `/inet/...` special files open network connections even through `getline <`.
+    !program.contains("system") && !program.contains("/inet") && !program.contains(['>', '|', '@']) && !rest[i + 1..].iter().any(|f| f.starts_with('-') && f != "-")
 }
 
 /// `sort` only when there is no output file (`-o`, `--output`, including bundled `-ro` and abbreviated `--out`) and no compress program (`--compress-program`, abbreviated `--co`).
@@ -955,7 +1038,8 @@ fn assess_parsed(cmd: &str, parsed: &shell::Parsed, map: &DeviceMap, cwd: &Path,
         // PowerShell pieces are split at control words and braces and each command is inspected separately ("if" is not a command name; the command after `... } else { mytool ...` is inspected too)
         let start = words.len() - stripped.len();
         let parts: Vec<(usize, &[String])> = if ps { ps_parts(stripped).into_iter().map(|(o, p)| (start + o, p)).collect() } else { bash_cmd_start(stripped).map(|o| (start + o, &stripped[o..])).into_iter().collect() };
-        let unread: Vec<(usize, &[String])> = parts.into_iter().filter(|(at, p)| !is_read_segment(p, ps) && !(ps && ps_string_output(seg, *at, p))).collect();
+        let safe: Vec<bool> = seg.words.iter().map(|w| w.literal && !w.brace).collect();
+        let unread: Vec<(usize, &[String])> = parts.into_iter().filter(|(at, p)| !is_read_segment(p, safe.get(*at..*at + p.len()).unwrap_or(&[]), ps) && !(ps && ps_string_output(seg, *at, p))).collect();
         let Some(&(first_at, first)) = unread.first() else { continue };
         let deep = shell::deep_words(words.iter().map(|s| s.as_str()));
         a.self_guard |= touches_self(&deep) || in_olp;
@@ -980,7 +1064,9 @@ fn assess_parsed(cmd: &str, parsed: &shell::Parsed, map: &DeviceMap, cwd: &Path,
         for (fam, at) in fams {
             let first_literal = seg_literal(seg, at);
             let ps_number = ps && ps_number_literal(fam.split(' ').next().unwrap_or(""));
-            if !family_is_name(&fam) || !first_literal || ps_number {
+            // A path-qualified first word (`./mytool`, `bin/mytool`) runs that file, so it never takes the bare name's answer (review memo M1).
+            let pathed_name = seg.words.get(at).is_some_and(|w| pathed(&w.text));
+            if !family_is_name(&fam) || !first_literal || ps_number || pathed_name {
                 a.unnamed = true;
                 // PowerShell info line (when the parser is unavailable): block/exec verbs are shown because the name is human-readable; meaningless pieces (`"1mb"`, `$x`) give 0
                 if let Some(w) = seg.words.get(at).filter(|w| EXEC_VERBS.contains(&base(&w.text).as_str())) {
@@ -1003,7 +1089,7 @@ fn assess_parsed(cmd: &str, parsed: &shell::Parsed, map: &DeviceMap, cwd: &Path,
     }
     // PowerShell hybrid: when the Rust analysis ends only in "no name, unclassified" (no danger kind, table entry or self-protection), re-read with the PowerShell syntax parser.
     // Only parsed reads pass, risky methods get a card, unknown things still ask. If the parser is unavailable, the current verdict plus an info line.
-    if ps && a.findings.is_empty() && a.classified.is_empty() && !a.self_guard && !a.unanswerable && (a.unnamed || !a.to_classify.is_empty()) {
+    if ps && limits.ps_parser && a.findings.is_empty() && a.classified.is_empty() && !a.self_guard && !a.unanswerable && (a.unnamed || !a.to_classify.is_empty()) {
         match crate::ps_ast::parse(cmd) {
             Some(facts) => {
                 let (kinds, unknown) = judge_ps_facts(&facts);
@@ -1100,7 +1186,7 @@ fn judge_ps_facts(facts: &[crate::ps_ast::Fact]) -> (Vec<(Kind, &'static str)>, 
                     'b' => "{}".to_string(),
                     _ => v.clone(),
                 }).collect();
-                if !is_read_segment(&words, true) {
+                if !is_read_segment(&words, &[], true) {
                     note(&mut unknown, v0.clone());
                 }
             }
@@ -1262,7 +1348,7 @@ mod tests {
         for f in ["a.txt", "b.txt", "c.log"] {
             std::fs::write(d.join("build").join(f), "x").unwrap();
         }
-        let a = assess("PowerShell", &serde_json::json!({ "command": cmd }), &DeviceMap::default(), &d, Limits { counter: Some(Duration::from_secs(3)) });
+        let a = assess("PowerShell", &serde_json::json!({ "command": cmd }), &DeviceMap::default(), &d, Limits { counter: Some(Duration::from_secs(3)), ps_parser: true });
         a.findings.iter().map(|f| (f.count.n, f.count.why_unknown)).collect()
     }
     #[test]
@@ -1299,7 +1385,7 @@ mod tests {
         let _ = std::fs::create_dir_all(&d);
         std::fs::write(d.join("x,y.txt"), "x").unwrap();
         for cmd in ["Remove-Item 'x,y.txt'", "Remove-Item x,y.txt"] {
-            let a = assess("PowerShell", &serde_json::json!({ "command": cmd }), &DeviceMap::default(), &d, Limits { counter: Some(Duration::from_secs(3)) });
+            let a = assess("PowerShell", &serde_json::json!({ "command": cmd }), &DeviceMap::default(), &d, Limits { counter: Some(Duration::from_secs(3)), ps_parser: true });
             assert_eq!(a.findings.iter().map(|f| (f.count.n, f.count.why_unknown)).collect::<Vec<_>>(), [(None, Some(NOT_COUNTED))], "{cmd}");
         }
     }
@@ -1308,7 +1394,7 @@ mod tests {
         // Regression: for `... | Where-Object { ... } | ForEach-Object { ... "{0} files={1}" -f ... }; git check-ignore build`, the card listed pieces
         // such as `"}"`, `"1mb"` and `"{0} files=..."` as classification candidates. PowerShell block commands now give 0 candidates plus one block line, still treated as a write (never a read pass).
         let cmd = r#"Get-ChildItem -Directory -Recurse -Depth 2 -Filter build | Where-Object { $_.FullName -notmatch 'node_modules' } | ForEach-Object { $s=(Get-ChildItem $_.FullName -Recurse -File | Measure-Object Length -Sum); "{0} files={1} MB={2:N1}" -f $_.FullName,$s.Count,($s.Sum/1MB) }; git status --short | Select-Object -First 10; git check-ignore build"#;
-        let run = |tool: &str, c: &str| assess(tool, &serde_json::json!({ "command": c }), &DeviceMap::default(), Path::new("."), Limits { counter: None });
+        let run = |tool: &str, c: &str| assess(tool, &serde_json::json!({ "command": c }), &DeviceMap::default(), Path::new("."), Limits { counter: None, ps_parser: true });
         // Pieces not shaped like a name and block/exec verbs give 0 candidates. `git check-ignore` is a read, so it also gives 0 candidates.
         let a = run("PowerShell", cmd);
         assert!(a.to_classify.is_empty(), "{:?}", a.to_classify);
@@ -1359,7 +1445,7 @@ mod tests {
         }
         let ds = d.to_string_lossy().to_string();
         let run = |tool: &str, cmd: &str| -> Vec<(Option<u64>, Option<&'static str>)> {
-            let a = assess(tool, &serde_json::json!({ "command": cmd }), &DeviceMap::default(), &d, Limits { counter: Some(Duration::from_secs(3)) });
+            let a = assess(tool, &serde_json::json!({ "command": cmd }), &DeviceMap::default(), &d, Limits { counter: Some(Duration::from_secs(3)), ps_parser: true });
             a.findings.iter().map(|f| (f.count.n, f.count.why_unknown)).collect()
         };
         let moved = Some(CHANGES_FOLDER);
@@ -1391,7 +1477,7 @@ mod tests {
     #[test]
     fn powershell_read_cmdlets_pass_but_bash_list_unchanged() {
         assert!(ps_counts(r"Get-ChildItem -Force -Directory | Select-Object Name; Test-Path .\build").is_empty());
-        let rd = |t: &str, c: &str| assess(t, &serde_json::json!({ "command": c }), &DeviceMap::default(), Path::new("."), Limits { counter: None });
+        let rd = |t: &str, c: &str| assess(t, &serde_json::json!({ "command": c }), &DeviceMap::default(), Path::new("."), Limits { counter: None, ps_parser: true });
         let a = rd("PowerShell", r"Get-Content .\a.txt | Measure-Object -Line");
         assert!(a.findings.is_empty() && a.to_classify.is_empty() && a.classified.is_empty());
         // ForEach-Object and Where-Object run script blocks, so they are outside the read list

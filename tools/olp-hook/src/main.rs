@@ -22,7 +22,7 @@ Commands:
   help       this text";
 
 /// Consent question (exact text from the usage-signal design). Enter = no.
-const USAGE_QUESTION: &str = "Send anonymous daily usage numbers to FeedPia? (counts only, no commands or file names) [y/N] ";
+const USAGE_QUESTION: &str = "Send daily usage counts to FeedPia? (a random per-project ID that stays the same; never names, commands, or file names) [y/N] ";
 
 /// Asks and reads the answer only on an interactive terminal (no way to answer yes via pipe, option, environment variable or setting). None if not a terminal.
 fn ask_usage() -> Option<String> {

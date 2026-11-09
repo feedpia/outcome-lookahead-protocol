@@ -8,6 +8,8 @@ pub struct Word {
     pub literal: bool,
     /// Word that started with a quote. The word right after the PowerShell call operator `&` is false (it is the command to run).
     pub quoted: bool,
+    /// An unquoted `{` or `}` (Bash brace expansion can turn `{x,-i}` into an option). Quoted braces do not count.
+    pub brace: bool,
 }
 
 /// Separator **before** a segment. Only `AndAnd` means "this segment runs only if the previous one succeeded"; `cd` following relies on that alone.
@@ -57,6 +59,7 @@ fn parse_with(cmd: &str, ps: bool) -> Parsed {
     let mut lit = true;
     let mut in_word = false;
     let mut quoted = false;
+    let mut brace = false;
     let mut called = false; // after PowerShell `&` (call operator): next word is the command to run
     let mut pending_out = false; // next word is the output redirect target
     let mut skip_in = false; // next word is an input redirect target (ignored)
@@ -65,7 +68,7 @@ fn parse_with(cmd: &str, ps: bool) -> Parsed {
     macro_rules! end_word {
         () => {
             if in_word {
-                let w = Word { text: std::mem::take(&mut cur), literal: lit, quoted: quoted && !called };
+                let w = Word { text: std::mem::take(&mut cur), literal: lit, quoted: quoted && !called, brace };
                 called = false;
                 if pending_out {
                     // PowerShell `> $null` / `2>$null` is a discard target (exactly `$null`; `$nullx` and other variables are treated normally)
@@ -82,6 +85,7 @@ fn parse_with(cmd: &str, ps: bool) -> Parsed {
             cur.clear();
             lit = true;
             quoted = false;
+            brace = false;
             in_word = false;
         };
     }
@@ -264,6 +268,7 @@ fn parse_with(cmd: &str, ps: bool) -> Parsed {
                 cur.push(ch);
             }
             _ => {
+                brace |= ch == '{' || ch == '}';
                 in_word = true;
                 cur.push(ch);
             }

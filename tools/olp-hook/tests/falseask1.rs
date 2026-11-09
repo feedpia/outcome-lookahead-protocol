@@ -7,7 +7,7 @@ use olp_hook::store::DeviceMap;
 use std::path::Path;
 
 fn read(cmd: &str) -> bool {
-    assess_bash(cmd, &DeviceMap::default(), Path::new("."), Limits { counter: None }).is_read()
+    assess_bash(cmd, &DeviceMap::default(), Path::new("."), Limits { counter: None, ps_parser: true }).is_read()
 }
 
 #[test]
@@ -23,8 +23,9 @@ fn git_version_and_no_pager_reads_are_reads() {
 
 #[test]
 fn git_global_options_that_can_launch_programs_stay_unread() {
-    // Keep the deliberate exclusions: -C, -c and --exec-path can launch programs through configuration
-    for cmd in ["git -C /tmp/x status", "git -c core.pager=less log", "git --exec-path=/x status", "git --no-pager -c core.fsmonitor=x status"] {
+    // Keep the deliberate exclusions: -c with a program-naming key and --exec-path can launch programs through configuration.
+    // 0.1.2: `git -C <folder> <read>` is a read, the same as `cd <folder> && git <read>` (already a read); a `-C` value that can expand still asks.
+    for cmd in ["git -C $D status", "git -c core.pager=less log", "git --exec-path=/x status", "git --no-pager -c core.fsmonitor=x status"] {
         assert!(!read(cmd), "{cmd}: must stay not a read");
     }
 }
@@ -45,6 +46,6 @@ fn timeout_wraps_the_command_after_its_duration() {
         assert!(!read(cmd), "{cmd}: must not be a read");
     }
     // Nothing missed: a delete after timeout is still a delete prompt
-    let a = assess_bash("timeout 30 rm -rf build", &DeviceMap::default(), Path::new("."), Limits { counter: None });
+    let a = assess_bash("timeout 30 rm -rf build", &DeviceMap::default(), Path::new("."), Limits { counter: None, ps_parser: true });
     assert!(!a.is_read() && a.findings.iter().any(|f| f.kind == Kind::FileDelete), "timeout 30 rm -rf build must be a delete");
 }
