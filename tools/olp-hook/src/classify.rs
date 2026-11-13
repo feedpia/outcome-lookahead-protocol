@@ -164,6 +164,8 @@ pub const BUILTIN_OVERWRITE_TOOLS: &[&str] = &["Write", "Edit", "MultiEdit", "No
 pub const SHELL_TOOLS: &[&str] = &["Bash", "PowerShell"];
 
 const DELETE_VERBS: &[&str] = &["rm", "rmdir", "unlink", "shred", "srm", "del", "erase", "rd", "ri", "remove-item", "trash", "trash-put"];
+/// Names whose definition is a delete but that take no file list (0.1.3, DESIGN_OLP_013_RULES §4): a drive format and a recycle-bin clear. Not in DELETE_VERBS, so `count_for` keeps "this form is not counted".
+const DELETE_BY_DEFINITION: &[&str] = &["format-volume", "clear-recyclebin"];
 const OVERWRITE_VERBS: &[&str] = &["cp", "mv", "dd", "truncate", "tee", "install", "rsync", "ln", "copy-item", "cpi", "move-item", "mi", "set-content", "out-file", "clear-content", "rename-item"];
 const WRAPPERS: &[&str] = &["sudo", "doas", "nohup", "time", "nice", "command", "exec", "env"];
 const FIND_WRITE_OPTS: &[&str] = &["-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf", "-fls"];
@@ -489,6 +491,13 @@ pub fn detect_dangers(w: &[String]) -> Vec<Kind> {
         if bi == "find" && w[i..].iter().any(|a| a == "-delete") {
             k.push(Kind::FileDelete);
         }
+        if DELETE_BY_DEFINITION.contains(&bi) || (bi == "robocopy" && w[i..].iter().any(|a| a == "/mir" || a == "/purge")) {
+            k.push(Kind::FileDelete);
+        }
+        // `% Delete`, `ForEach-Object Delete`, `ForEach-Object -MemberName Delete`: the method called on each item is Delete.
+        if (bi == "%" || bi == "foreach-object") && w[i + 1..].iter().find(|a| *a != "-membername").is_some_and(|a| a == "delete") {
+            k.push(Kind::FileDelete);
+        }
         if bi == "sed" && w[i..].iter().any(|a| a.starts_with("-i") || a == "--in-place") {
             k.push(Kind::FileOverwrite);
         }
@@ -692,12 +701,22 @@ fn count_for(kind: Kind, words: &[String], seg: &Segment, entry: Option<&Entry>,
             None => Count::unknown(unit, "remote and branch are not both given"),
         },
         Kind::GitResetHard if w0 == "git" && w.get(1).map(|s| s == "reset").unwrap_or(false) => count_or_unknown(unit, counter::count_uncommitted_changes(cwd, deadline)),
+        Kind::FileDelete if runtime_target(w) => Count::unknown(unit, RUNTIME_TARGET),
         _ => Count::unknown(unit, "this form is not counted"),
     }
 }
 
+/// A delete inside a `sh`/`bash`/`zsh`/`dash` `-c` script whose target is a `$` value (also after `xargs` or `find -exec`): the target is only known when it runs.
+fn runtime_target(w: &[String]) -> bool {
+    w.windows(3).any(|t| {
+        ["sh", "bash", "zsh", "dash"].contains(&base(&t[0]).as_str()) && t[1] == "-c" && t[2].contains('$') && detect_dangers(&shell::deep_words([t[2].as_str()])).contains(&Kind::FileDelete)
+    })
+}
+
 const PATTERNS: &str = "the paths use patterns or variables";
 const NOT_COUNTED: &str = "this form is not counted";
+/// 0.1.3 ⑥-a reason (same `count not checked (reason)` frame, card.rs unchanged). Wording pending the two native-speaker checks (REVIEW_013_DESIGN_RULES Q4).
+const RUNTIME_TARGET: &str = "the target is only known at run time";
 
 /// Path arguments of PowerShell `Remove-Item` (including aliases). Only known switches, `-Path`/`-LiteralPath` values and `-ErrorAction`-style values are skipped over;
 /// other parameters (-WhatIf, -Filter, -Include, -Exclude, etc.), cmd-style `/s` and piped input (no path) are not counted (no invented numbers). Comma arrays are split by `ps_split_commas`.

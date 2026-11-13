@@ -24,7 +24,7 @@ fn help_first_line_names_full_protocol() {
         let (code, out, err) = run(&[a], b"");
         assert_eq!(code, 0, "{a}: {err}");
         assert_eq!(out.lines().next(), Some("olp-hook — Outcome Lookahead Protocol (OLP) device hook"), "{a}");
-        for sub in ["install", "uninstall", "classify", "stats", "watch", "setup", "signal"] {
+        for sub in ["install", "uninstall", "classify", "stats", "replay", "watch", "setup", "signal"] {
             assert!(out.contains(sub), "{a}: subcommand {sub} missing");
         }
         assert!(!err.contains("blocked"), "{a}: fell into hook mode");

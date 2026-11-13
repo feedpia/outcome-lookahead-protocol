@@ -1,4 +1,4 @@
-# release.yml — build, test and publish OLP 0.1.2.
+# release.yml — build, test and publish OLP 0.1.3.
 # What it does:
 #   - push to a ci/olp-* branch (practice) = build and test on 5 targets + npm pack + release archives + e2e (5 OS, 11 environment jobs) + real Claude Code (claude -p and interactive screen recording). Publishes nothing.
 #   - push of a v* tag = the above + (only when build, pack and e2e are all green) publish the 6 npm packages + a GitHub release draft.
@@ -224,6 +224,54 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
+  # 0.1.3 tag gate cell «fuzz» (DESIGN_OLP_013_FUZZ v2, ledger 1254 ②): seeded random commands into the verdict engine.
+  # Same 5-OS matrix as chaos (darwin-x64 on the Intel runner; the build matrix only cross-builds it). No new crate.
+  # OLP_FUZZ_FULL=1 here only — every other `cargo test` runs the 1/10 smoke; the gate counts receipts with full: true.
+  fuzz:
+    name: fuzz ${{ matrix.key }} (seeded verdict-engine inputs)
+    needs: build
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { key: win32-x64,    os: windows-latest,   threads: "--test-threads=1" }
+          - { key: darwin-arm64, os: macos-latest,     threads: "" }
+          - { key: darwin-x64,   os: macos-15-intel,   threads: "" }
+          - { key: linux-x64,    os: ubuntu-latest,    threads: "" }
+          - { key: linux-arm64,  os: ubuntu-24.04-arm, threads: "" }
+    steps:
+      - uses: actions/checkout@v4
+      - name: toolchain
+        shell: bash
+        run: |
+          rustup toolchain install "${RUST_TOOLCHAIN}" --profile minimal --no-self-update
+          rustup default "${RUST_TOOLCHAIN}"
+      # Same warm-up as the build job: the first powershell.exe start can exceed the parser's 1.5 s limit.
+      - name: PowerShell 데우기(Windows)
+        if: matrix.key == 'win32-x64'
+        shell: bash
+        run: for i in 1 2 3; do powershell.exe -NoProfile -NonInteractive -NoLogo -Command "exit 0"; done
+      - name: fuzz (full)
+        shell: bash
+        env:
+          OLP_FUZZ_FULL: '1'
+          OLP_FUZZ_OUT: fuzz-out
+          OLP_FUZZ_OS_KEY: ${{ matrix.key }}
+        run: |
+          mkdir -p fuzz-out
+          OLP_FUZZ_OUT="$PWD/fuzz-out" cargo test --manifest-path "${HOOK_DIR}/Cargo.toml" --locked --test fuzz -- ${{ matrix.threads }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: qual-fuzz-${{ matrix.key }}
+          path: fuzz-out/qual.json
+          if-no-files-found: error
+          retention-days: 90
+
   e2e:
     name: e2e ${{ matrix.key }}
     needs: pack
@@ -306,7 +354,7 @@ jobs:
           npm install -g @anthropic-ai/claude-code >/dev/null 2>&1 && claude --version
           export HOME="$(mktemp -d)"; P="$(mktemp -d)/proj"; mkdir -p "$P/build"; cd "$P"
           git init -q && echo a > build/a.txt && echo x > app.js && git add -A && git -c user.email=e@x -c user.name=e commit -qm init
-          npm init -y >/dev/null && npm install --no-audit --no-fund "$GITHUB_WORKSPACE/dist/feedpia-olp-${{ matrix.key }}-0.1.2.tgz" "$GITHUB_WORKSPACE/dist/feedpia-olp-0.1.2.tgz" >/dev/null
+          npm init -y >/dev/null && npm install --no-audit --no-fund "$GITHUB_WORKSPACE/dist/feedpia-olp-${{ matrix.key }}-0.1.3.tgz" "$GITHUB_WORKSPACE/dist/feedpia-olp-0.1.3.tgz" >/dev/null
           npx --no-install olp install </dev/null
           before=$(wc -l < .olp/hook-log.jsonl 2>/dev/null || echo 0)
           # One delete and one read-only run. After each, print the hook log line count and verdict (the log never holds the command text; the command comes from the denials list in the claude JSON result).
@@ -757,6 +805,7 @@ jobs:
             pt=$(npm view @feedpia/$p@$V dist.attestations.provenance.predicateType 2>/dev/null)
             echo "@feedpia/$p@$V provenance=$pt"
             [ "$pt" = "https://slsa.dev/provenance/v1" ] || { echo "::error::@feedpia/$p@$V has no SLSA provenance"; exit 1; }
+            [ "$p" = olp ] && echo "pt_main=$pt" >> "$GITHUB_OUTPUT" || echo "pt_os=$pt" >> "$GITHUB_OUTPUT"
           done
       - name: npx 설치 → 훅 2 → 지우기 → 훅 0 (깨끗한 폴더)
         shell: bash
@@ -772,4 +821,22 @@ jobs:
           npx -y @feedpia/olp@$V uninstall </dev/null; b=$?; n2=$(cnt)
           line="${{ matrix.key }} v$V install=$a hooks=$n1 binary_exists=$e uninstall=$b hooks_after=$n2"
           echo "$line"; echo "- $line" >> "$GITHUB_STEP_SUMMARY"
+          # 0.1.3 ⑦: receipt for the post-tag bundle (kx_tag_gate collect --post). Counts and exit codes only; publisher = name + trustedPublisher.id (no email); provenance = predicateType of @feedpia/olp and the OS package (checked in the step above).
+          mkdir -p "$GITHUB_WORKSPACE/qual"
+          npm view "@feedpia/olp@$V" _npmUser --json > "$RUNNER_TEMP/npmuser.json" 2>/dev/null || echo 'null' > "$RUNNER_TEMP/npmuser.json"
+          node -e '
+            const fs = require("fs"); const [out, key, v, a, n1, e, b, n2, run, sha, u, ptm, pto] = process.argv.slice(1);
+            let user = null; try { user = JSON.parse(fs.readFileSync(u, "utf8")); } catch (_) {}
+            const pub = user && typeof user === "object" ? { name: user.name || null, trusted_publisher: (user.trustedPublisher && user.trustedPublisher.id) || null } : { name: null, trusted_publisher: null };
+            const r = { kind: "h9", os: key, version: v, run_id: Number(run), head_sha: sha, counts: { install_rc: Number(a), hooks: Number(n1), binary_exists: e === "yes", uninstall_rc: Number(b), hooks_after: Number(n2) }, provenance: { main: ptm || null, os: pto || null }, publisher: pub };
+            r.ok = r.counts.install_rc === 0 && r.counts.hooks === 2 && r.counts.binary_exists && r.counts.uninstall_rc === 0 && r.counts.hooks_after === 0;
+            fs.writeFileSync(out, JSON.stringify(r, null, 2) + "\n");
+          ' "$GITHUB_WORKSPACE/qual/qual-h9-${{ matrix.key }}.json" "${{ matrix.key }}" "$V" "$a" "$n1" "$e" "$b" "$n2" "$GITHUB_RUN_ID" "$GITHUB_SHA" "$RUNNER_TEMP/npmuser.json" "${{ steps.ver.outputs.pt_main }}" "${{ steps.ver.outputs.pt_os }}"
           [ "$a" = 0 ] && [ "$n1" = 2 ] && [ "$e" = yes ] && [ "$b" = 0 ] && [ "$n2" = 0 ]
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: qual-h9-${{ matrix.key }}
+          path: qual/qual-h9-${{ matrix.key }}.json
+          if-no-files-found: warn
+          retention-days: 90

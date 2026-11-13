@@ -2,5 +2,8 @@
   "chaos": {"total": 78, "ok": 78, "panics": 0, "leaks": 0},
   "e2e": {"install": 0, "hooks": 2, "card_delete": 1, "card_overwrite": 1, "uninstall": 0, "hooks_after": 0},
   "t7c": {"m1_max_s": 0.5, "m4_min_s": 4, "m4_max_s": 7, "ctrl_min_s": 1.5, "alive_margin_s": 1.0},
-  "replay": {"missed": 0, "commands_min": 40000}
+  "replay": {"missed": 0, "commands_min": 40000},
+  "e2e_013": {"replay_exit": 0, "replay_stopped": 1, "replay_untouched": 1, "card_delcard": 4, "reason_runtime": 1, "rules_line": 1, "marker_cleanup": 1},
+  "chaos_013": {"marker_total": 8, "marker_ok": 8},
+  "fuzz": {"fuzz_gen": 1, "seeds": [1301, 1302, 1303], "cases_pure": 27900, "cases_ps_win32": 200, "full": true, "panics": 0, "timeouts": 0, "nondeterministic_pure": 0, "max_ms_max": 5000}
 }

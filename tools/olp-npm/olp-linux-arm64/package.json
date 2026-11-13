@@ -1,6 +1,6 @@
 {
   "name": "@feedpia/olp-linux-arm64",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "olp-hook for Linux arm64 (static musl build). Installed by @feedpia/olp; do not install directly.",
   "license": "MIT",
   "repository": {

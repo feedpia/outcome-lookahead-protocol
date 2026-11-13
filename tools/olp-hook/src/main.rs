@@ -1,6 +1,6 @@
 //! olp-hook executable: only reads stdin and sets the exit code. The decision lives in the lib (`olp_hook`).
 //! A panic also becomes exit 2 (block) — Claude Code treats exit codes other than 0 and 2 as non-blocking errors and runs the tool anyway.
-//! Subcommands run by a person: classify · stats · setup · signal (the opt-in signal is reachable only through this subcommand, never from the hook path).
+//! Subcommands run by a person: classify · stats · replay · setup · signal (the opt-in signal is reachable only through this subcommand, never from the hook path).
 
 use std::io::{BufRead, IsTerminal, Read, Write};
 use std::path::PathBuf;
@@ -15,6 +15,7 @@ Commands:
   uninstall  remove only the olp-hook lines from that settings file (--user, --dry-run)
   classify   remember what a tool or command does, for this project
   stats      your numbers on this device
+  replay     check past Claude Code commands without running them (--today, --days N, --show N, --json)
   watch      show the latest card next to the prompt (--html for a page)
   setup      optional daily usage numbers (off by default) and .git/info/exclude
   signal     send those numbers now, if you said yes
@@ -128,6 +129,16 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(|s| s.as_str()) {
         Some("classify") => finish(olp_hook::classify_cli(&project_dir(), &args[1..])),
+        Some("replay") => {
+            let home = home_dir().unwrap_or_else(|| finish(Err("could not find your home folder".to_string())));
+            let env = olp_hook::replay::ReplayEnv {
+                home,
+                now: olp_hook::store::now(),
+                claudecode: std::env::var_os("CLAUDECODE").is_some(),
+                version: env!("CARGO_PKG_VERSION").to_string(),
+            };
+            finish(olp_hook::replay::replay_cli(&args[1..], &env))
+        }
         Some("stats") => {
             let p = project_dir();
             let plain = args.iter().any(|a| a == "--plain");

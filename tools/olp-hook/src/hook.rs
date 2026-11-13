@@ -11,6 +11,7 @@ use crate::store::{self, DeviceMap, Entry, LogLine};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
+use std::sync::Arc;
 use std::time::Duration;
 
 pub const EXIT_ALLOW: i32 = 0;
@@ -155,6 +156,68 @@ fn quiet_passes(a: &Assessment, quiet: bool) -> bool {
     quiet && a.findings.is_empty() && !a.self_guard && a.effect() == Some(Effect::WritesOther) && card::reasons(a) == ["WRITE_RECOVERY_DECLARED"]
 }
 
+/// One hook call as `decide` sees it (no tool_use_id, no event name: those only matter to the shell that writes the record).
+pub struct HookRequest {
+    pub tool: String,
+    pub input: Value,
+    pub cwd: PathBuf,
+    pub mode: Option<String>,
+}
+
+/// Which way the hook goes. The shell (`run_hook`) does the matching write and card for each route, in the same order as before.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Route {
+    Read,
+    QuietPass,
+    CwdDeny,
+    Ask,
+    Block { no_prompt_mode: Option<&'static str> },
+}
+
+#[derive(Debug, Clone)]
+pub struct Decided {
+    pub route: Route,
+    /// The opt-in decision card may be tried (after CwdDeny, before Ask/Block); if it gives no card the route stands.
+    pub decision_candidate: bool,
+    pub a: Assessment,
+}
+
+/// The verdict with no writes, deletes or network: it only reads the disk to count. Same input and same disk -> same `Decided`.
+/// Limits and budget come from the caller (the hook shell passes the project config values).
+pub fn decide(req: HookRequest, project: &Path, cfg: &config::Config, map: Arc<DeviceMap>, limits: Limits, budget: Option<Duration>) -> Result<Decided, GuardFail> {
+    let HookRequest { tool, input, cwd, mode } = req;
+    // Also include the project folder in the comparison set, so deletes of the project folder (settings location) or above are blocked even when the shell is outside the project (inside the decision thread only).
+    let anchor = project.to_path_buf();
+    let a = guarded(
+        move || {
+            classify::set_project_anchor(Some(anchor));
+            classify::assess(&tool, &input, &map, &cwd, limits)
+        },
+        budget,
+    )?;
+    let prompts = mode.as_deref().map(|m| PROMPT_MODES.contains(&m)).unwrap_or(false);
+    let only_delete = !a.findings.is_empty() && a.findings.iter().all(|f| f.kind == classify::Kind::FileDelete);
+    let decision_candidate = cfg.decision && only_delete && !a.self_guard && !a.unanswerable && a.classified.is_empty() && a.to_classify.is_empty();
+    let route = if a.is_read() {
+        Route::Read
+    } else if quiet_passes(&a, cfg.quiet) {
+        Route::QuietPass
+    } else if prompts && a.cwd_critical && !a.self_guard {
+        Route::CwdDeny
+    } else if prompts && !a.self_guard {
+        Route::Ask
+    } else {
+        // If blocked because the mode does not prompt, add a mode hint (known mode names only, else unknown).
+        let known: &'static str = match mode.as_deref() {
+            Some("bypassPermissions") => "bypassPermissions",
+            Some("dontAsk") => "dontAsk",
+            _ => "unknown",
+        };
+        Route::Block { no_prompt_mode: (!prompts).then_some(known) }
+    };
+    Ok(Decided { route, decision_candidate, a })
+}
+
 /// One hook run. If `project` is None, CLAUDE_PROJECT_DIR is the project folder, else the input's cwd.
 pub fn run_hook(stdin: &[u8], project: Option<&Path>) -> HookOutcome {
     let start = std::time::Instant::now();
@@ -194,24 +257,16 @@ pub fn run_hook(stdin: &[u8], project: Option<&Path>) -> HookOutcome {
     };
     store::mark_run(&project);
     let limits = Limits { counter: cfg.counter_limit(), ps_parser: true };
-    // Also include the project folder in the comparison set, so deletes of the project folder (settings location) or above are blocked even when the shell is outside the project (inside the decision thread only).
-    let anchor = project.clone();
-    let assessed = guarded(
-        move || {
-            classify::set_project_anchor(Some(anchor));
-            classify::assess(&tool, &input, &map, &cwd, limits)
-        },
-        cfg.hook_budget(),
-    );
-    let a = match assessed {
-        Ok(a) => a,
+    let decided = decide(HookRequest { tool, input, cwd, mode }, &project, &cfg, Arc::new(map), limits, cfg.hook_budget());
+    let Decided { route, decision_candidate, a } = match decided {
+        Ok(d) => d,
         Err(GuardFail::Timeout) => return blocked_error(Some(&project), "the hook took longer than hook_budget_ms"),
         Err(GuardFail::Panic) => return blocked_error(Some(&project), "internal error"),
     };
-    if a.is_read() {
+    if route == Route::Read {
         return HookOutcome { code: EXIT_ALLOW, stderr: String::new(), stdout: String::new() };
     }
-    if quiet_passes(&a, cfg.quiet) {
+    if route == Route::QuietPass {
         // Record even when passing. If the record cannot be written, do not pass.
         return match store::append_log(&project, &decision_line(&a, "quiet_pass")) {
             Ok(()) => HookOutcome { code: EXIT_ALLOW, stderr: String::new(), stdout: String::new() },
@@ -220,8 +275,7 @@ pub fn run_hook(stdin: &[u8], project: Option<&Path>) -> HookOutcome {
     }
     // Deleting the working folder or above: the Claude Code built-in prompt discards this card and one Yes deletes it (measured 18/18), so block even in asking modes, with the card and a way to retry.
     // Non-asking modes and self-protection stay as below (exit 2).
-    let prompts = mode.as_deref().map(|m| PROMPT_MODES.contains(&m)).unwrap_or(false);
-    if prompts && a.cwd_critical && !a.self_guard {
+    if route == Route::CwdDeny {
         let names: Vec<String> = delete_files(&a).and_then(|(files, total)| pick::names_line(&project, &files, total)).into_iter().collect();
         let reason = format!("{} | {}", card::ask_reason_with(&a, &names), card::CWD_GUIDE);
         let mut line = decision_line(&a, "blocked");
@@ -230,8 +284,7 @@ pub fn run_hook(stdin: &[u8], project: Option<&Path>) -> HookOutcome {
         return deny_outcome(&reason);
     }
     // Decision card (default off): a call containing only deletions with rule 1 is blocked once regardless of mode, and the options go to the agent.
-    let only_delete = !a.findings.is_empty() && a.findings.iter().all(|f| f.kind == classify::Kind::FileDelete);
-    if cfg.decision && only_delete && !a.self_guard && !a.unanswerable && a.classified.is_empty() && a.to_classify.is_empty() {
+    if decision_candidate {
         if let Some(r) = delete_files(&a).and_then(|(files, total)| decision::check(&project, &files, total, pick::nature_deadline(start, cfg.hook_budget()))) {
             let mut line = decision_line(&a, "decision_asked");
             line.tool_use_id = tool_use_id;
@@ -240,7 +293,7 @@ pub fn run_hook(stdin: &[u8], project: Option<&Path>) -> HookOutcome {
         }
     }
     // Writes, money, unclassified = Claude Code's own prompt (ask). Modes that may show no prompt, and self-protection = block (exit 2).
-    if prompts && !a.self_guard {
+    if route == Route::Ask {
         // If a file the human chose to keep is among this delete's targets, do not run, and give a "retry without it" reason (blocking side only; no names in the record).
         if cfg.pick {
             if let Some(kept) = delete_files(&a).and_then(|(files, _)| pick::kept_in_target(&project, &files)) {
@@ -275,9 +328,7 @@ pub fn run_hook(stdin: &[u8], project: Option<&Path>) -> HookOutcome {
         }
         return ask_outcome(&a, &reason_extras, &extras);
     }
-    // If blocked because the mode does not prompt, add a mode hint (known mode names only, else unknown).
-    let known = mode.as_deref().filter(|m| ["bypassPermissions", "dontAsk"].contains(m)).unwrap_or("unknown");
-    let no_prompt_mode = (!prompts).then_some(known);
+    let Route::Block { no_prompt_mode } = route else { unreachable!("every other route returned above") };
     let mut stderr = card::block_card(&a, no_prompt_mode);
     if store::append_log(&project, &decision_line(&a, "blocked")).is_err() {
         stderr.push_str("\n(note: this block could not be recorded on this device)");

@@ -1,6 +1,6 @@
 {
   "name": "@feedpia/olp",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Outcome Lookahead Protocol (OLP): see what an AI agent's command would remove before it runs. Installs the olp-hook device hook for Claude Code.",
   "license": "MIT",
   "repository": {
@@ -20,10 +20,10 @@
     "node": ">=18"
   },
   "optionalDependencies": {
-    "@feedpia/olp-darwin-arm64": "=0.1.2",
-    "@feedpia/olp-darwin-x64": "=0.1.2",
-    "@feedpia/olp-linux-arm64": "=0.1.2",
-    "@feedpia/olp-linux-x64": "=0.1.2",
-    "@feedpia/olp-win32-x64": "=0.1.2"
+    "@feedpia/olp-darwin-arm64": "=0.1.3",
+    "@feedpia/olp-darwin-x64": "=0.1.3",
+    "@feedpia/olp-linux-arm64": "=0.1.3",
+    "@feedpia/olp-linux-x64": "=0.1.3",
+    "@feedpia/olp-win32-x64": "=0.1.3"
   }
 }

@@ -122,7 +122,7 @@ def attempt():
         log('claude 입력 칸 뜸 → /clear'); r.send('/clear'); r.pump(0.5); r.p.write('\r'); r.pump(2)
         # from here: recording + captions
         r.rec_t0 = time.time()
-        r.events.append([0.0, 'o', f'\x1b[2J\x1b[H# OLP 0.1.2 · {key} · Claude Code {ccver} · {lang}  (첫 실행 안내는 건너뜀)\r\n'])
+        r.events.append([0.0, 'o', f'\x1b[2J\x1b[H# OLP 0.1.3 · {key} · Claude Code {ccver} · {lang}  (첫 실행 안내는 건너뜀)\r\n'])
         r.p.write('\x0c'); r.pump(1)   # redraw the screen
         mark = len(r.buf)
         log('지우기 부탁 보냄'); r.send(PROMPTS[lang][0]); r.pump(0.5); r.p.write('\r')

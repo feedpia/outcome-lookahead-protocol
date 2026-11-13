@@ -10,7 +10,7 @@ LABEL="${3:-${OLP_E2E_LABEL:-$KEY}}"   # for output
 SLOW="${OLP_E2E_SLOW:-0}"
 CARD_LIMIT_MS=10000   # the delete card must appear within this (FAIL if over)
 DIST="$(cd "$DIST" && pwd)"
-VER="0.1.2"
+VER="0.1.3"
 
 PASS=0; FAIL=0; SKIP=0; FACT=0
 ok()   { echo "PASS  $1"; PASS=$((PASS+1)); }
@@ -96,7 +96,16 @@ read_check() { # read_check <name> : PASS only if allowed by default. In slow mo
 no_panic() { ! grep -q panicked "$1"; }
 has_text() { [ -s "$1" ]; }
 
+# 0.1.3 cells 13·14·15 compare against text read from this checkout's source (one match each, or empty = that key stays 0).
+SRC_DIR="$(cd "$(dirname "$0")/.." && pwd)/src"
+PARTS="$(cd "$(dirname "$0")" && native_pwd)/receipt_parts.js"   # source-text readers + meets, tested by test_receipt_parts.js
+RUNTIME_TXT="$(node "$PARTS" runtime "$SRC_DIR/classify.rs" 2>/dev/null)"
+RULES_TXT="$(node "$PARTS" rules "$SRC_DIR/rules.rs" 2>/dev/null)"
+Q_REPLAY_EXIT=1; Q_REPLAY_STOPPED=0; Q_REPLAY_UNTOUCHED=0; Q_CARD_DELCARD=0; Q_REASON_RUNTIME=0; Q_RULES_LINE=0; Q_MARKER_CLEANUP=0
+
 echo "== E2E $LABEL  (key: $KEY, slow: $SLOW, root: $ROOT)"
+self_test() { node --test "$(cd "$(dirname "$0")" && native_pwd)/test_receipt_parts.js" >"$ROOT/self_test.out" 2>&1 || { cat "$ROOT/self_test.out"; return 1; }; }
+check "0 영수증 조각 자기 시험(E-meets·E-src)" self_test
 echo "== 가짜 홈: $FAKE_HOME"
 npm_cache_inside() { case "$(npm config get cache 2>/dev/null | tr '\' /)" in "$(printf %s "$FAKE_HOME" | tr '\' /)"/*) return 0;; *) return 1;; esac; }
 check "0 npm 캐시가 가짜 홈 안" npm_cache_inside
@@ -248,6 +257,54 @@ else
   check "10 묶음 설치에서 지우기 -> 카드 10초 안 ($(cat "$OUT.ms")ms)" card_within_10s
 fi
 
+# ---------- 13. olp replay (0.1.3 ③): re-judges recorded commands, runs none of them, writes nothing in the project ----------
+check "13 원본에서 비교 글자 읽음(RUNTIME_TARGET · Permission rules 줄)" test -n "$RUNTIME_TXT" -a -n "$RULES_TXT"
+PR="$(make_project replay)"
+PR_N="$(cd "$PR" && native_pwd)"
+RREC="$ROOT/기록/projects/p1"; mkdir -p "$RREC"
+RREC_N="$(cd "$ROOT/기록/projects" && native_pwd)"
+tree_sig() { node -e '
+  const fs = require("fs"), path = require("path"), out = [];
+  const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true }).sort((a, b) => a.name < b.name ? -1 : 1)) {
+    const f = path.join(d, e.name); if (e.isDirectory()) walk(f); else out.push(path.relative(process.argv[1], f) + " " + fs.readFileSync(f).toString("base64")); } };
+  walk(process.argv[1]); console.log(require("crypto").createHash("sha256").update(out.join("\n")).digest("hex"));' "$1"; }
+SIG0="$(tree_sig "$PR")"
+# one delete, one read, one broken line — the same shape as tests/replay.rs line() (assistant tool_use with cwd and timestamp)
+node -e '
+  const [file, cwd] = process.argv.slice(1), ts = new Date(Date.now() - 60000).toISOString();
+  const rec = (id, cmd) => JSON.stringify({ type: "assistant", cwd, timestamp: ts, permissionMode: "default",
+    message: { content: [{ type: "tool_use", id, name: "Bash", input: { command: cmd } }] } });
+  require("fs").writeFileSync(file, [rec("toolu_e2e_1", "rm -rf build"), rec("toolu_e2e_2", "git status --short"), "{ not json"].join("\n") + "\n");
+' "$RREC/s.jsonl" "$PR_N"
+( cd "$P1" && npx --no-install olp replay --dir "$RREC_N" --json </dev/null >"$ROOT/replay.out" 2>"$ROOT/replay.err" ); Q_REPLAY_EXIT=$?
+check "13 olp replay 종료 0" test "$Q_REPLAY_EXIT" = "0"
+Q_REPLAY_STOPPED="$(node -e 'try{const j=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));console.log((j.ask|0)+(j.block|0))}catch(e){console.log(-1)}' "$ROOT/replay.out")"
+check "13 지우기 1줄만 멈춤으로 셈 (멈춤 $Q_REPLAY_STOPPED)" test "$Q_REPLAY_STOPPED" = "1"
+check "13 깨진 줄 1개를 깨진 줄로 셈" test "$(node -e 'try{console.log(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).broken)}catch(e){console.log(-1)}' "$ROOT/replay.out")" = "1"
+check "13 panic 문구 없음" no_panic "$ROOT/replay.err"
+[ -f "$PR/build/a.txt" ] && [ "$(tree_sig "$PR")" = "$SIG0" ] && Q_REPLAY_UNTOUCHED=1
+check "13 기록의 명령을 돌리지 않음(build 그대로 · 프로젝트 바이트 같음)" test "$Q_REPLAY_UNTOUCHED" = "1"
+
+# ---------- 14. delete-by-definition card (0.1.3 ②·⑥-a): same Rust classifier on every OS, so the card on every OS ----------
+for f in "robocopy src build /MIR" "Format-Volume -DriveLetter Z" "Clear-RecycleBin -Force" "Get-ChildItem build | % Delete"; do
+  run_hook "$P1" "$CMD" PowerShell "$f"
+  if card_within_10s && reason_has "delete files"; then Q_CARD_DELCARD=$((Q_CARD_DELCARD+1)); ok "14 지우기 카드 10초 안: $f ($(cat "$OUT.ms")ms)"; else bad "14 지우기 카드 10초 안: $f ($(cat "$OUT.ms")ms)"; fi
+done
+run_hook "$P1" "$CMD" Bash "sh -c 'rm -f \"\$1\"' _ build/a.txt"
+[ -n "$RUNTIME_TXT" ] && card_within_10s && reason_has "$RUNTIME_TXT" && Q_REASON_RUNTIME=1
+check "14 실행 때 정해지는 대상 -> 카드 이유에 원본 글자 ($(cat "$OUT.ms")ms)" test "$Q_REASON_RUNTIME" = "1"
+check "14 시험이 build/ 를 지우지 않음(셈만)" test -f "$P1/build/a.txt"
+
+# ---------- 15. install-end rules line (0.1.3 ①): one broad 'always allow' rule in the project settings ----------
+P7="$(make_project rules)"
+mkdir -p "$P7/.claude"
+printf '{\n  "permissions": { "allow": ["Bash(rm:*)"] }\n}\n' > "$P7/.claude/settings.json"
+( cd "$P7" && "$INSTALLED" install </dev/null >"$ROOT/rules.out" 2>&1 ); RC=$?
+check "15 install 종료 0" test "$RC" = "0"
+[ -n "$RULES_TXT" ] && grep -qF "$RULES_TXT" "$ROOT/rules.out" && Q_RULES_LINE=1
+check "15 설치 끝에 넓은 규칙 1개 줄(원본 글자 포함)" test "$Q_RULES_LINE" = "1"
+check "15 규칙은 그대로(읽기만)" test "$(node -e 'console.log(JSON.stringify(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).permissions.allow))' "$P7/.claude/settings.json")" = '["Bash(rm:*)"]'
+
 # ---------- 8. unusual home ----------
 # (a) project = home, no --user -> refused, settings not written
 ( cd "$FAKE_HOME" && "$INSTALLED" install </dev/null >"$ROOT/home.out" 2>&1 ); RC=$?
@@ -265,7 +322,12 @@ check "8b 설정 안 써짐" test ! -e "$P4/.claude/settings.json"
 Q_HOOKS=$(( $(settings_info "$S1" count) + $(settings_info "$S1" post) ))
 ( cd "$P1" && npx --no-install olp uninstall </dev/null >/dev/null 2>&1 ); Q_UNINSTALL=$?
 check "11 npx olp uninstall 종료 0" test "$Q_UNINSTALL" = "0"
-Q_HOOKS_AFTER=$(( $(settings_info "$S1" count) + $(settings_info "$S1" post) ))
+# 0.1.3 ⑤: install created this settings file (fresh project) and nothing else is in it, so uninstall deletes it (backup in <home>/olp/backup).
+check "11 install 이 만든 설정 파일 지워짐" test ! -e "$S1"
+check "11 표식 파일도 지워짐" test ! -e "$P1/.olp/install-created-settings.json"
+[ ! -e "$S1" ] && [ ! -e "$P1/.olp/install-created-settings.json" ] && Q_MARKER_CLEANUP=1
+check "11 지우기 전 백업 남음" sh -c 'ls "$1"/olp/backup/proj-settings-*.json >/dev/null 2>&1' _ "$FAKE_HOME"
+if [ -e "$S1" ]; then Q_HOOKS_AFTER=$(( $(settings_info "$S1" count) + $(settings_info "$S1" post) )); else Q_HOOKS_AFTER=0; fi
 check "11 uninstall 뒤 우리 칸 0개" test "$Q_HOOKS_AFTER" = "0"
 
 # ---------- 12. upgrade over the published 0.1.1, then undo ----------
@@ -304,8 +366,8 @@ new_bin_is_installed() { tar -xOzf "$DIST/feedpia-olp-$KEY-$VER.tgz" "package/bi
 check "12 설치된 실행 파일 = 이 판의 실행 파일" new_bin_is_installed
 ( cd "$P6" && npx --no-install olp uninstall </dev/null >/dev/null 2>&1 ); RC=$?
 check "12 uninstall 종료 0" test "$RC" = "0"
-# Uninstall rewrites the file in standard formatting and keeps the empty event lists install created (install.rs remove_where),
-# so the bytes differ from the original even after a single install and uninstall (also in 0.1.1). Check the meaning instead:
+# Uninstall rewrites the file in standard formatting. Since 0.1.3 it deletes the empty event lists install created (install marker),
+# but an upgrade over 0.1.1 has no marker for what 0.1.1 created, so the PostToolUse list 0.1.1 made can stay. Check the meaning:
 # same JSON once empty hook lists are dropped, and record whether the bytes are the same.
 same_meaning() { node -e '
   const fs = require("fs");
@@ -324,15 +386,18 @@ echo "E2E $LABEL: $PASS PASS, $FAIL FAIL, $SKIP SKIP, $FACT FACT"
 # hooks = our PreToolUse + PostToolUse entries after install (counted just before uninstall; installs since then left it unchanged, see 4).
 if [ -n "${OLP_E2E_QUAL:-}" ]; then
   node -e '
-    const [out, key, inst, hooks, del, ow, un, after, fail, exe] = process.argv.slice(1);
+    const [out, key, inst, hooks, del, ow, un, after, fail, exe, rx, rs, ru, dc, rr, rl, mc, parts] = process.argv.slice(1);
     const fs = require("fs"), crypto = require("crypto");
-    const counts = { install: +inst, hooks: +hooks, card_delete: +del, card_overwrite: +ow, uninstall: +un, hooks_after: +after };
-    const meets = counts.install === 0 && counts.hooks === 2 && counts.card_delete === 1 && counts.card_overwrite === 1 && counts.uninstall === 0 && counts.hooks_after === 0;
+    const counts = { install: +inst, hooks: +hooks, card_delete: +del, card_overwrite: +ow, uninstall: +un, hooks_after: +after,
+      replay_exit: +rx, replay_stopped: +rs, replay_untouched: +ru, card_delcard: +dc, reason_runtime: +rr, rules_line: +rl, marker_cleanup: +mc };
+    // 0.1.3 keys (DESIGN_OLP_013_TAG_GATE §2-1): the same values as tag_gate_thresholds.json e2e_013, so ok here = the gate recompute.
+    const meets = require(parts).meets(counts);
     let sha = null; try { sha = crypto.createHash("sha256").update(fs.readFileSync(exe)).digest("hex"); } catch (e) {}
     const q = { kind: "e2e", os: key, head_sha: process.env.GITHUB_SHA || null, run_id: process.env.GITHUB_RUN_ID ? +process.env.GITHUB_RUN_ID : null,
       ok: meets && +fail === 0, counts, hook_sha256: sha, made_at: new Date().toISOString().replace(/\.\d+Z$/, "Z") };
     fs.writeFileSync(out, JSON.stringify(q, null, 2) + "\n");
     console.log("qual.json: " + JSON.stringify(q));
-  ' "$OLP_E2E_QUAL" "$KEY" "$INST_RC" "$Q_HOOKS" "$Q_CARD_DELETE" "$Q_CARD_OVERWRITE" "$Q_UNINSTALL" "$Q_HOOKS_AFTER" "$FAIL" "$P1/node_modules/@feedpia/olp-$KEY/bin/$EXE_NAME"
+  ' "$OLP_E2E_QUAL" "$KEY" "$INST_RC" "$Q_HOOKS" "$Q_CARD_DELETE" "$Q_CARD_OVERWRITE" "$Q_UNINSTALL" "$Q_HOOKS_AFTER" "$FAIL" "$P1/node_modules/@feedpia/olp-$KEY/bin/$EXE_NAME" \
+    "$Q_REPLAY_EXIT" "$Q_REPLAY_STOPPED" "$Q_REPLAY_UNTOUCHED" "$Q_CARD_DELCARD" "$Q_REASON_RUNTIME" "$Q_RULES_LINE" "$Q_MARKER_CLEANUP" "$PARTS"
 fi
 [ "$FAIL" = "0" ]
