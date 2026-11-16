@@ -1,4 +1,4 @@
-//! Project config `<project>/.olp/hook-config.json`. There is no global config or environment-variable switch (quiet mode is a per-project opt-in).
+//! Project config `<home>/.olp/projects/<key>/hook-config.json` (rev 17-3; not inside the project, see store::trust_dir). There is no global config or environment-variable switch (quiet mode is a per-project opt-in).
 //! The two time limits come only from here (no constants in code). If either is missing or `counter_timeout_ms >= hook_budget_ms`, counting is skipped (= "unchecked").
 
 use serde::Deserialize;
@@ -43,8 +43,10 @@ impl Config {
     }
 }
 
+/// In the user's own folder for this project (rc4 rev 17-3, `store::trust_dir`): a `.olp/hook-config.json` carried by a cloned
+/// repository is ignored, so it cannot switch on quiet mode or the decision card.
 pub fn path(project: &Path) -> std::path::PathBuf {
-    project.join(".olp").join("hook-config.json")
+    crate::store::trust_dir(project).join("hook-config.json")
 }
 
 /// Bundled default config: used when the project config is missing or leaves a limit empty. Values live only in data files (no constants in code).
@@ -72,6 +74,9 @@ pub fn bundled_signal_manual_timeout_s() -> Option<u64> {
 /// No file = bundled default. If present, its values are used and only empty limit fields are filled from the bundled default. A malformed file is Err (the hook blocks).
 pub fn load(project: &Path) -> Result<Config, &'static str> {
     let base = bundled();
+    if crate::store::home().is_none() {
+        return Ok(base);
+    }
     match std::fs::read(path(project)) {
         Ok(b) => {
             let mut cfg: Config = serde_json::from_slice(&b).map_err(|_| "hook-config.json could not be read")?;

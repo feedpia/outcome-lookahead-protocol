@@ -17,15 +17,12 @@ fn written_off_without_junk(a: &Assessment) -> bool {
     !a.is_read() && a.effect().is_none() && a.to_classify.is_empty() && card.contains("Not classified yet") && !card.contains("olp-hook classify")
 }
 
-#[test]
-fn s1_block_command_is_a_parsed_read_or_written_off_without_junk() {
-    let cmd = r#"Get-ChildItem -Directory -Recurse -Depth 2 -Filter build | Where-Object { $_.FullName -notmatch 'node_modules' } | ForEach-Object { $s=(Get-ChildItem $_.FullName -Recurse -File | Measure-Object Length -Sum); "{0} files={1} MB={2:N1}" -f $_.FullName,$s.Count,($s.Sum/1MB) }; git status --short | Select-Object -First 10; git check-ignore build"#;
-    common::require_ps_parser_or_env_fallback("block command", || run(cmd), |a: &Assessment| a.is_read(), |a| !a.is_read() && a.effect().is_none() && a.to_classify.is_empty());
-}
+// Block command (test s1_block_command_is_a_parsed_read_or_written_off_without_junk):
+// moved to simple_form_only::reads_that_now_ask (rc4 rev 15: not a simple form → asks)
 
 #[test]
 fn value_only_blocks_are_parsed_reads_or_written_off_without_junk() {
-    for r in ["ForEach-Object { 1 }", "where-object x"] {
-        common::require_ps_parser_or_env_fallback(r, || run(r), |a: &Assessment| a.is_read(), written_off_without_junk);
-    }
+    // `ForEach-Object { 1 }`: moved to simple_form_only::reads_that_now_ask (rc4 rev 15: not a simple form → asks)
+    let r = "where-object x";
+    common::require_ps_parser_or_env_fallback(r, || run(r), |a: &Assessment| a.is_read(), written_off_without_junk);
 }

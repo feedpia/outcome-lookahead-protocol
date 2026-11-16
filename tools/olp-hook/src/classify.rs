@@ -164,6 +164,8 @@ pub const BUILTIN_OVERWRITE_TOOLS: &[&str] = &["Write", "Edit", "MultiEdit", "No
 pub const SHELL_TOOLS: &[&str] = &["Bash", "PowerShell"];
 
 const DELETE_VERBS: &[&str] = &["rm", "rmdir", "unlink", "shred", "srm", "del", "erase", "rd", "ri", "remove-item", "trash", "trash-put"];
+/// Names whose definition is a delete but that take no file list (0.1.3, DESIGN_OLP_013_RULES §4): a drive format and a recycle-bin clear. Not in DELETE_VERBS, so `count_for` keeps "this form is not counted".
+const DELETE_BY_DEFINITION: &[&str] = &["format-volume", "clear-recyclebin"];
 const OVERWRITE_VERBS: &[&str] = &["cp", "mv", "dd", "truncate", "tee", "install", "rsync", "ln", "copy-item", "cpi", "move-item", "mi", "set-content", "out-file", "clear-content", "rename-item"];
 const WRAPPERS: &[&str] = &["sudo", "doas", "nohup", "time", "nice", "command", "exec", "env"];
 const FIND_WRITE_OPTS: &[&str] = &["-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf", "-fls"];
@@ -197,12 +199,249 @@ pub struct Limits {
 pub fn family_of(words: &[String]) -> Option<String> {
     let w = strip_prefix_words(words);
     let w0 = base(w.first()?);
+    if let Some(k) = runner_key(w, &w0) {
+        return Some(k);
+    }
+    if let Some(name) = interpreter_name(&w0) {
+        return Some(interpreter_key(w, &name));
+    }
     if let Some(w1) = w.get(1) {
         if !w1.starts_with('-') && w1.chars().all(|c| c.is_ascii_alphanumeric() || "-_:".contains(c)) {
             return Some(format!("{w0} {}", w1.to_lowercase()));
         }
     }
     Some(w0)
+}
+
+/// Programs that start a package runner (DESIGN_OLP013_RC4_RUNNER_KEY §2-1). One-word runners run the package named next;
+/// the others are runners only with the second word in `TWO_WORD_RUNNERS` (`npm run`, `yarn build` keep their 0.1.x key; design 1-6 adds `pnpm exec`, `yarn exec`).
+const RUNNER_PROGRAMS: &[&str] = &["npx", "pnpx", "bunx", "npm", "pnpm", "yarn", "bun"];
+const ONE_WORD_RUNNERS: &[&str] = &["npx", "pnpx", "bunx"];
+const TWO_WORD_RUNNERS: &[(&str, &str)] =
+    &[("npm", "exec"), ("npm", "x"), ("pnpm", "dlx"), ("pnpm", "exec"), ("yarn", "dlx"), ("yarn", "exec"), ("bun", "x")];
+/// Value-less runner flags skipped before the package name (§2-2 2). Any other flag means the package cannot be named.
+const RUNNER_PLAIN_FLAGS: &[&str] = &["-y", "--yes", "-q", "--quiet", "--no", "--no-install", "--prefer-offline", "--prefer-online", "--"];
+
+/// The runner program behind a first word, also in its Windows `.cmd`/`.ps1` form (review blocking 2 ⓑ).
+fn runner_program(w0: &str) -> Option<&'static str> {
+    let n = w0.strip_suffix(".cmd").or_else(|| w0.strip_suffix(".ps1")).unwrap_or(w0);
+    RUNNER_PROGRAMS.iter().copied().find(|p| *p == n)
+}
+
+/// Group key for a package runner call: `<runner> <package>` (§2-2 4), or the runner alone when the package cannot be named.
+/// A runner-only key is never a name (`runner_only`), so it is never stored, read or offered on a card. None = not a runner call.
+fn runner_key(w: &[String], w0: &str) -> Option<String> {
+    let prog = runner_program(w0)?;
+    let (runner, rest): (String, &[String]) = if ONE_WORD_RUNNERS.contains(&prog) {
+        (prog.to_string(), &w[1..])
+    } else {
+        match w.get(1) {
+            // A global flag before the runner word (`npm --yes exec x`): no group answer this version (review blocking 2 ⓐ).
+            Some(w1) if w1.starts_with('-') => return Some(prog.to_string()),
+            Some(w1) if TWO_WORD_RUNNERS.contains(&(prog, w1.to_lowercase().as_str())) => (format!("{prog} {}", w1.to_lowercase()), &w[2..]),
+            // `yarn tsx`, `bun tsx`: the program runs an interpreter bin, so one answer would cover every script (second review blocking 3).
+            Some(w1) if is_interpreter(&w1.to_lowercase()) => return Some(prog.to_string()),
+            Some(_) => return None,
+            None => return Some(prog.to_string()),
+        }
+    };
+    let i = rest.iter().take_while(|x| RUNNER_PLAIN_FLAGS.contains(&x.as_str())).count();
+    match rest.get(i).and_then(|s| package_name(s)) {
+        // `npx tsx`, `pnpm exec node`: an interpreter as the package takes no group answer (second review blocking 3).
+        Some(p) if is_interpreter(&p) => Some(runner),
+        Some(p) => Some(format!("{runner} {p}")),
+        None => Some(runner),
+    }
+}
+
+/// An npm package name (`name` or `@scope/name`, lowercased) with a trailing version spec dropped. None when the word is not
+/// a name: a flag, path, URL, variable, or an `@` spec that is not a version (`@npm:`, `@file:`, `@github:` name another package,
+/// review blocking 1).
+fn package_name(spec: &str) -> Option<String> {
+    if spec.starts_with('-') {
+        return None;
+    }
+    let s = spec.to_lowercase();
+    let (scoped, body) = match s.strip_prefix('@') {
+        Some(b) => (true, b),
+        None => (false, s.as_str()),
+    };
+    let (name, version) = match body.find('@') {
+        Some(i) => (&body[..i], Some(&body[i + 1..])),
+        None => (body, None),
+    };
+    if let Some(v) = version {
+        if v.is_empty() || !v.chars().all(|c| c.is_ascii_alphanumeric() || ".^~<>=*|+ -".contains(c)) {
+            return None;
+        }
+    }
+    let part = |p: &str| !p.is_empty() && !p.starts_with('.') && p.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "-._~".contains(c));
+    if scoped {
+        let (scope, n) = name.split_once('/')?;
+        (part(scope) && part(n)).then(|| format!("@{name}"))
+    } else {
+        part(name).then(|| name.to_string())
+    }
+}
+
+/// A key that names only a package runner (or the one-word runner program): one answer would cover every package it runs.
+pub fn runner_only(family: &str) -> bool {
+    RUNNER_PROGRAMS.contains(&family) || TWO_WORD_RUNNERS.iter().any(|(a, b)| family.split_once(' ') == Some((a, b)))
+}
+
+/// Script interpreters, the closed list of DESIGN_OLP013_RC4_RUNNER_KEY 1-6 §2-1c (19): the group key is `<interpreter> <script path>`,
+/// so one script's answer never covers another.
+const INTERPRETERS: &[&str] = &[
+    "node", "nodejs", "deno", "bun", "tsx", "ts-node", "python", "python3", "py", "ruby", "perl", "php", "bash", "sh", "zsh", "dash", "pwsh", "powershell", "cmd",
+];
+
+/// Whether a name (already without `.exe`/`.cmd`/`.ps1`) is a script interpreter, also in a versioned form such as `python3.12`.
+fn is_interpreter(n: &str) -> bool {
+    INTERPRETERS.contains(&n) || n.strip_prefix("python").is_some_and(|v| !v.is_empty() && v.chars().all(|c| c.is_ascii_digit() || c == '.'))
+}
+
+/// The interpreter behind a first word, with its Windows `.cmd`/`.ps1` suffix dropped (`.exe` is already dropped by `base`).
+fn interpreter_name(w0: &str) -> Option<String> {
+    let n = w0.strip_suffix(".cmd").or_else(|| w0.strip_suffix(".ps1")).unwrap_or(w0);
+    is_interpreter(n).then(|| n.to_string())
+}
+
+/// §2-1c key: `<interpreter> <script>` when the very next word is a script path inside the project (rules 1-3, 5), and
+/// `deno run <path>`, `bun run <file.ext>`, `bun <file>` (rule 6). Anything else is the interpreter alone, which is never a name.
+/// `bun run <script>` stays `bun run`; other subcommand words are handled below.
+fn interpreter_key(w: &[String], name: &str) -> String {
+    if (name == "deno" || name == "bun") && w.get(1).is_some_and(|w1| w1.eq_ignore_ascii_case("run")) {
+        return match w.get(2) {
+            Some(w2) if name == "bun" && plain_word(w2) => "bun run".to_string(),
+            Some(w2) => match script_path(w2) {
+                Some(sp) if name == "deno" || sp.rsplit('/').next().is_some_and(|f| f.contains('.')) => format!("{name} run {sp}"),
+                _ => name.to_string(),
+            },
+            None => name.to_string(),
+        };
+    }
+    match w.get(1) {
+        // Design 1-8: a word without `/`, `\` or `.` is not a path. For bun and deno a subcommand-shaped word keeps the 0.1.x
+        // two-word key (`bun install`, `deno test`); for every other interpreter it takes no group answer (`node server`, `php artisan`).
+        Some(w1) if !w1.contains(['/', '\\', '.']) => match (name == "bun" || name == "deno") && plain_word(w1) {
+            true => format!("{name} {}", w1.to_lowercase()),
+            false => name.to_string(),
+        },
+        Some(w1) => match script_path(w1) {
+            Some(sp) => format!("{name} {sp}"),
+            None => name.to_string(),
+        },
+        None => name.to_string(),
+    }
+}
+
+/// A word shaped like a 0.1.x subcommand: letters, digits, `-`, `_`, `:` only.
+fn plain_word(s: &str) -> bool {
+    !s.starts_with('-') && !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || "-_:".contains(c))
+}
+
+/// §2-1c rules 2-3: a literal relative path inside the project. Allowed letters are `A-Z a-z 0-9 . _ - /` and `\` only (design 1-6);
+/// `\` is read as `/` and leading `./` is dropped (case kept); a leading `/` (also a network path), a drive letter, `~`, `@`, spaces,
+/// any `..` piece, variables, globs and braces are not a path here.
+fn script_path(word: &str) -> Option<String> {
+    let mut p = word.replace('\\', "/");
+    while let Some(r) = p.strip_prefix("./") {
+        p = r.to_string();
+    }
+    let ok = !p.starts_with('-')
+        && !p.starts_with('/')
+        && p.chars().any(|c| c.is_ascii_alphanumeric())
+        && p.chars().all(|c| c.is_ascii_alphanumeric() || "._/-".contains(c))
+        && p.split('/').all(|piece| !piece.is_empty() && piece != "..")
+        // Design 1-8: still a path after normalizing (`./test` -> `test` is not, so it never shares `bun test`).
+        && p.contains(['.', '/']);
+    ok.then_some(p)
+}
+
+/// §2-1c rule 4: the hook folder written relative to the project root, as `""` (root) or `"sub/dir/"`. None when the folder is not
+/// inside the project or a piece is not a plain path letter; then an interpreter key takes no group answer. No file is opened.
+fn root_prefix(cwd: &Path) -> Option<String> {
+    let Some(root) = PROJECT_ANCHOR.with(|p| p.borrow().clone()) else { return Some(String::new()) };
+    if cwd == root {
+        return Some(String::new());
+    }
+    let rel = cwd.strip_prefix(&root).ok()?;
+    let mut out = String::new();
+    for c in rel.components() {
+        let std::path::Component::Normal(s) = c else { return None };
+        let s = s.to_str()?;
+        if s.is_empty() || !s.chars().all(|ch| ch.is_ascii_alphanumeric() || "._-".contains(ch)) || s == "." || s == ".." {
+            return None;
+        }
+        out.push_str(s);
+        out.push('/');
+    }
+    Some(out)
+}
+
+/// An interpreter key with its script path written from the project root (`node a.js` run in `sub` -> `node sub/a.js`).
+/// Subcommand keys (`php artisan`) are left alone; a folder outside the project leaves the interpreter alone (unnamed).
+fn rooted_interpreter_key(fam: &str, cwd: &Path) -> String {
+    let Some((head, path)) = fam.rsplit_once(' ') else { return fam.to_string() };
+    if plain_word(path) && !head.contains(' ') && !path.contains('.') {
+        return fam.to_string();
+    }
+    match root_prefix(cwd) {
+        Some(pre) if pre.is_empty() => fam.to_string(),
+        Some(pre) => format!("{head} {pre}{path}"),
+        None => fam.split(' ').next().unwrap_or(fam).to_string(),
+    }
+}
+
+/// Design 1-11 §2-4d ①②③: the words before the program are only exact table wrappers and the value-less flags
+/// `sudo -n`/`-E`/`-H` and `env -i`. Any `NAME=value`, any other flag (value-taking, bundled, `=`, shortened) or
+/// any other word means the shape is not understood.
+fn understood_prefix(prefix: &[String]) -> bool {
+    let mut wrapper = "";
+    for w in prefix {
+        let b = base(w);
+        if !pathed(w) && WRAPPERS.contains(&b.as_str()) {
+            wrapper = WRAPPERS.iter().copied().find(|x| *x == b).unwrap_or("");
+            continue;
+        }
+        let ok_flag = (wrapper == "sudo" && ["-n", "-E", "-H"].contains(&w.as_str())) || (wrapper == "env" && w == "-i");
+        if !ok_flag {
+            return false;
+        }
+    }
+    true
+}
+
+/// Shell words that change the environment, options or what later names mean (design 1-12 §2-4d ⑤ «outside the list»):
+/// never a group answer and never offered on a card (second review RECHECK 9a54918df blocking 1: the card offered `export`).
+const ENV_CHANGE_VERBS: &[&str] =
+    &["export", "declare", "typeset", "readonly", "local", "set", "unset", "alias", "unalias", "eval", "hash", "trap", "function", "shopt", "set-item", "set-variable", "new-variable"];
+
+/// Design 1-12 §2-4d ⑤ closed tables: first words of an earlier piece that may stand before an interpreter or runner key.
+const PROVEN_READ_BASH: &[&str] = &["ls", "cat", "echo", "pwd", "true", "date", "sleep", "head", "tail", "grep", "rg", "wc", "which", "git"];
+const PROVEN_READ_PS: &[&str] = &["get-childitem", "get-content", "write-output", "get-location", "git"];
+
+/// Keys the closed grammar applies to: the program is an interpreter, a runner program or a §2-4c ⓑ word.
+fn closed_grammar_family(family: &str) -> bool {
+    let w0 = family.split(' ').next().unwrap_or("");
+    is_interpreter(w0) || RUNNER_PROGRAMS.contains(&w0) || w0 == "corepack"
+}
+
+/// A key made by `runner_key` (`npx cowsay`, `bun x cowsay`): its last word is a package, not a path.
+fn runner_family(family: &str) -> bool {
+    let mut it = family.split(' ');
+    let (a, b) = (it.next().unwrap_or(""), it.next().unwrap_or(""));
+    ONE_WORD_RUNNERS.contains(&a) || TWO_WORD_RUNNERS.contains(&(a, b))
+}
+
+/// A key that names only an interpreter: never stored, read or offered on a card.
+pub fn interpreter_only(family: &str) -> bool {
+    !family.contains(' ') && is_interpreter(family)
+}
+
+/// A key whose first word is an interpreter (§2-1c rule 4: after a folder move in the same command it takes no group answer).
+pub fn interpreter_family(family: &str) -> bool {
+    family.split(' ').next().is_some_and(is_interpreter)
 }
 
 /// The word left after stripping leading env assignments (`A=b`), wrappers (sudo, env, etc.) and their flags.
@@ -246,6 +485,11 @@ pub fn family_is_name(family: &str) -> bool {
         && cs.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "._+-".contains(c))
         && w0.chars().any(|c| c.is_ascii_lowercase())
         && !EXEC_VERBS.contains(&w0)
+        && !runner_only(family)
+        && !interpreter_only(family)
+        && !olp_self(family)
+        && !wide_last_word(family)
+        && !ENV_CHANGE_VERBS.contains(&w0)
 }
 
 /// PowerShell numeric literal shape (`10`, `2.5`, `1mb`, `3GB`): `^\d+(\.\d+)?(kb|mb|gb|tb|pb)?$`, case-insensitive.
@@ -260,7 +504,26 @@ fn ps_number_literal(w: &str) -> bool {
 /// First words that cannot take a group answer (danger-kind verbs and olp-hook itself).
 pub fn family_refused(family: &str) -> bool {
     let w0 = family.split(' ').next().unwrap_or("");
-    DELETE_VERBS.contains(&w0) || OVERWRITE_VERBS.contains(&w0) || w0 == "olp-hook"
+    DELETE_VERBS.contains(&w0) || OVERWRITE_VERBS.contains(&w0) || w0 == "olp-hook" || olp_self(family) || wide_last_word(family)
+}
+
+/// Design 1-10 §2-4c: a key whose last word (suffix `.cmd`/`.ps1`/`.bat`/`.exe` dropped, lowercased) is an interpreter or a
+/// runner/package-manager word (`npx tsx`, `yarn tsx`, `x node`, `corepack pnpm`) would cover every script or package it runs.
+fn wide_last_word(family: &str) -> bool {
+    let Some((_, last)) = family.rsplit_once(' ') else { return false };
+    let l = last.to_lowercase();
+    let n = [".cmd", ".ps1", ".bat", ".exe"].iter().find_map(|s| l.strip_suffix(*s)).unwrap_or(l.as_str());
+    is_interpreter(n) || ["npx", "pnpx", "bunx", "npm", "pnpm", "yarn", "bun", "corepack"].contains(&n)
+}
+
+/// Design 1-9 §2-4b: a key that runs OLP itself through a runner (`npx @feedpia/olp`, `pnpm exec olp`) or an interpreter
+/// (`node .../olp.js`): one read answer would also cover its write sub-commands, so it never takes a group answer.
+fn olp_self(family: &str) -> bool {
+    let Some((head, last)) = family.rsplit_once(' ') else { return false };
+    if runner_only(head) {
+        return last == "olp" || last == "@feedpia/olp";
+    }
+    interpreter_family(head) && ["olp", "olp.js", "olp-hook"].contains(&last.rsplit('/').next().unwrap_or(last))
 }
 
 /// `safe[i]` = word i cannot expand into other text (no unquoted `$`, glob, `~` or brace). Same length as `words`; missing = not safe.
@@ -292,6 +555,14 @@ fn is_read_segment(words: &[String], safe: &[bool], ps: bool) -> bool {
     match c.as_str() {
         "rg" => !rest.iter().any(|a| a.starts_with("--pre")),
         "find" => !rest.iter().any(|a| FIND_WRITE_OPTS.contains(&a.as_str())),
+        // `file -C` / `--compile` (any unambiguous prefix) writes `<magic>.mgc` (second review RECHECK rev 17-2 blocking 3).
+        "file" => !rest.iter().any(|a| match a.strip_prefix("--") {
+            Some(long) => {
+                let name = long.split('=').next().unwrap_or("");
+                !name.is_empty() && "compile".starts_with(name)
+            }
+            None => a.starts_with('-') && a.contains('C'),
+        }),
         "git" => git_read(rest, arg_safe),
         _ => READ_CMDS.contains(&c.as_str()),
     }
@@ -489,6 +760,13 @@ pub fn detect_dangers(w: &[String]) -> Vec<Kind> {
         if bi == "find" && w[i..].iter().any(|a| a == "-delete") {
             k.push(Kind::FileDelete);
         }
+        if DELETE_BY_DEFINITION.contains(&bi) || (bi == "robocopy" && w[i..].iter().any(|a| a == "/mir" || a == "/purge")) {
+            k.push(Kind::FileDelete);
+        }
+        // `% Delete`, `ForEach-Object Delete`, `ForEach-Object -MemberName Delete`: the method called on each item is Delete.
+        if (bi == "%" || bi == "foreach-object") && w[i + 1..].iter().find(|a| *a != "-membername").is_some_and(|a| a == "delete") {
+            k.push(Kind::FileDelete);
+        }
         if bi == "sed" && w[i..].iter().any(|a| a.starts_with("-i") || a == "--in-place") {
             k.push(Kind::FileOverwrite);
         }
@@ -538,8 +816,1000 @@ pub fn detect_dangers(w: &[String]) -> Vec<Kind> {
 
 /// If a deep word of a non-read piece shows olp-hook itself or the device folder, protect it.
 fn touches_self(deep: &[String]) -> bool {
-    deep.iter().any(|w| base(w) == "olp-hook" || w.contains(".olp"))
+    deep.iter().any(|w| base_name_is_hook(w) || w.contains(".olp"))
 }
+
+/// The one self-protection check (second review RECHECK 2 of rel c9d34233a, blocking 1): every path that judges a command —
+/// a plain piece, a redirect the parser could not name, a command that builds itself (heredoc, `$( )`, `>( )`) — calls this, so a
+/// target spelled the same way is judged the same way. `words` are judged one by one like `tee`/`cp` targets, and so is every word
+/// written after `>` in the raw text.
+fn self_guard(words: &[String], base: Option<&Path>, cmd: &str) -> bool {
+    touches_self(words) || touches_self_at(words, base, cmd) || redirect_words(cmd).iter().any(|w| target_is_olp_state(w, base, cmd))
+}
+
+/// OLP's own state (rev 17-3; B review of rel 49d7a9281, its RECHECK and the second review of b59d967e2). The trust folder is
+/// `<home>/.olp/projects/<key>/` and the installed hook is in `<home>/olp/`, so:
+/// 1. `.olp` anywhere in the target (or, for a target the parser could not name, anywhere in the command) = OLP's state.
+/// 2. A target that can be resolved — home variables expanded, made absolute against `base` (the folder after any `cd` the parser
+///    followed), normalised, and every link in its existing part resolved on disk — is compared once with `<home>/.olp` and
+///    `<home>/olp`. A link that cannot be resolved = OLP's state.
+/// 3. A target that cannot be resolved for sure (another variable, `~user`, a folder the parser could not follow) = OLP's state
+///    when the command contains `olp` anywhere. A glob is matched component by component against the two roots.
+fn target_is_olp_state(t: &str, base: Option<&Path>, ctx: &str) -> bool {
+    if t.contains(".olp") || (t.is_empty() && ctx.contains(".olp")) {
+        return true;
+    }
+    // A part the shell expands but this check does not ($'..', $"..", a lone $, a brace list) counts as `*` (second review RECHECK 6).
+    let g = unexpanded_as_wildcard(t);
+    if g != t && target_is_olp_state(&g, base, ctx) {
+        return true;
+    }
+    // A target led by a variable that is not a home variable can be anywhere: its trust-file name alone decides
+    // (second review RECHECK 8 coord side of rel 71131c8ee).
+    if g.starts_with('*') && t.starts_with('$') {
+        let leaf = g.rsplit(['/', '\\']).next().unwrap_or_default();
+        // the leaf must be written (letters), not itself a variable: a lone `$path` says nothing about the name
+        let written = g.contains(['/', '\\']) && leaf.chars().any(|c| c.is_ascii_alphabetic());
+        if written && ["hook-map.json", "hook-config.json"].iter().any(|n| pattern_may_match(leaf, n)) {
+            return true;
+        }
+    }
+    let unsure = || mentions_olp_component(ctx);
+    let Some(e) = expand_home(t) else { return other_home_may_hit_olp(t) || unsure() };
+    // The Git Bash spelling `/c/Users/<me>/…` (the Bash tool's own `$HOME` and `pwd` on Windows) is read as `C:/Users/<me>/…` before it is
+    // made absolute: `std::path::absolute` would otherwise put the rootless `\c\…` on the process drive (second review coord RECHECK 19).
+    // Only `/c/…` with a path after the letter: a two-letter word such as the `xcopy`/`robocopy` flag `/E` stays a word.
+    let e = if e.as_bytes().get(2) == Some(&b'/') { git_bash_path(&e).map(|p| p.to_string_lossy().into_owned()).unwrap_or(e) } else { e };
+    // A drive-relative target (`c:olp`, `c:.olp`) is relative to that drive's own current folder (design addendum 4-3): resolved against
+    // the working folder when that folder is on the same drive. On another drive its current folder is not known here: a drive letter
+    // no trust-folder root is on cannot reach them («the drive letter differs», existing or not — B FAIL R26 of rel 8d914a1e0), so it is
+    // not the trust folder unless the text names `olp` or a trust file; a root's own drive stays closed.
+    let drive_rel = drive_of(&e).filter(|_| cfg!(windows) && !e[2..].starts_with(['/', '\\']));
+    let e = match drive_rel {
+        Some(d) => match base.filter(|b| drive_of(&b.to_string_lossy()) == Some(d)) {
+            Some(b) => b.join(&e[2..]).to_string_lossy().into_owned(),
+            None => {
+                let root_drives: Vec<char> = olp_roots().iter().filter_map(|r| drive_of(r)).collect();
+                let shown_not = !root_drives.is_empty() && !root_drives.contains(&d);
+                // naming `olp` (`Z:olp/bin` names it only once the drive is cut off) or a trust file keeps it closed: the same command may
+                // still map that drive (`subst`)
+                let rest = e[2..].to_ascii_lowercase();
+                let names_trust_file = ["hook-map.json", "hook-config.json"].iter().any(|n| rest.contains(n));
+                return !shown_not || unsure() || mentions_olp_component(&e[2..]) || names_trust_file;
+            }
+        },
+        None => e,
+    };
+    let p = PathBuf::from(&e);
+    let abs = if p.is_absolute() || p.has_root() {
+        p
+    } else {
+        match base {
+            Some(b) => b.join(p),
+            None => return relative_glob_may_hit_olp(&e) || unsure(),
+        }
+    };
+    // a relative working folder (`.`) would leave the path relative, and its links could then never be resolved (every target = OLP's
+    // state, rc CI run 43724580621): made absolute against the process folder first
+    let abs = normalize(&std::path::absolute(&abs).unwrap_or(abs));
+    if e.contains(['*', '?', '[']) {
+        return glob_may_hit_olp(&abs) || unsure();
+    }
+    match resolve_links(&abs) {
+        Some(real) => under_olp_root(&abs) || under_olp_root(&real),
+        None => true,
+    }
+}
+
+/// `~user/rest` (another user's home, or `~+`/`~-`): bash expands it, so the first component of `rest` is matched like a glob
+/// against `olp` and `.olp` (more asking, never less: the home is not known here).
+fn other_home_may_hit_olp(t: &str) -> bool {
+    let Some(rest) = t.strip_prefix('~') else { return false };
+    let Some(at) = rest.find(['/', '\\']) else { return false };
+    // `~user/../x` leaves that home: where it lands is not known here (second review RECHECK 3 of rel 61983f0d3, blocking 1 ③)
+    if rest[at + 1..].split(['/', '\\']).any(|c| c == "..") {
+        return true;
+    }
+    let first = normalize(&Path::new("/").join(rest[at + 1..].replace('\\', "/")));
+    let Some(c) = first.components().find_map(|c| match c {
+        std::path::Component::Normal(n) => Some(n.to_string_lossy().to_string()),
+        _ => None,
+    }) else {
+        return false;
+    };
+    ["olp", ".olp"].iter().any(|r| c.eq_ignore_ascii_case(r) || pattern_may_match(&c, r))
+}
+
+/// The target with every part the shell expands but this check cannot follow replaced by `*`: `$'..'` and `$".."` (and a `$` whose
+/// quotes were already removed, i.e. a `$` not starting a variable name, `{` or `(`), and a brace list `{a,b}` not after `$`.
+/// Home variables (`$HOME`, `${HOME}`, `$USERPROFILE`, `$env:USERPROFILE` …) are kept for `expand_home`; every other variable is `*`. Applying it twice gives the same text.
+fn unexpanded_as_wildcard(t: &str) -> String {
+    let c: Vec<char> = t.chars().collect();
+    let mut out = String::new();
+    let mut i = 0;
+    while i < c.len() {
+        let ch = c[i];
+        let next = c.get(i + 1).copied();
+        if ch == '$' && matches!(next, Some('\'' | '"')) {
+            let q = next.unwrap_or('\'');
+            let mut j = i + 2;
+            while j < c.len() && c[j] != q {
+                j += if c[j] == '\\' { 2 } else { 1 };
+            }
+            out.push('*');
+            i = j + 1;
+            continue;
+        }
+        if ch == '$' && !next.is_some_and(|n| n.is_ascii_alphabetic() || n == '_' || n == '{' || n == '(') {
+            out.push('*');
+            i += 1;
+            continue;
+        }
+        // Any other variable (`$X`, `${X}`, `$(..)`, and `$olp` left by `$'o'lp` once quotes are gone) is `*`, unless it is one of
+        // the home variables `expand_home` resolves (second review RECHECK 7 coord side · B RECHECK 10 of 922c6bf14).
+        if ch == '$' {
+            let (name, end) = match next {
+                Some('{') => {
+                    let k = c[i..].iter().position(|&x| x == '}').map_or(c.len(), |k| i + k);
+                    (c[i + 2..k.min(c.len())].iter().collect::<String>(), (k + 1).min(c.len()))
+                }
+                Some('(') => {
+                    let mut depth = 0;
+                    let mut k = i + 1;
+                    while k < c.len() {
+                        depth += match c[k] {
+                            '(' => 1,
+                            ')' => -1,
+                            _ => 0,
+                        };
+                        k += 1;
+                        if depth == 0 {
+                            break;
+                        }
+                    }
+                    (String::from("("), k)
+                }
+                _ => {
+                    let mut k = i + 1;
+                    if c[k..].iter().take(4).collect::<String>().eq_ignore_ascii_case("env:") {
+                        k += 4;
+                    }
+                    while k < c.len() && (c[k].is_ascii_alphanumeric() || c[k] == '_') {
+                        k += 1;
+                    }
+                    (c[i + 1..k].iter().collect::<String>(), k)
+                }
+            };
+            let homes = ["HOME", "USERPROFILE", "env:HOME", "env:USERPROFILE"];
+            let home = homes.iter().any(|h| name.eq_ignore_ascii_case(h));
+            // `${HOME%/}` and the default forms (`${HOME:-x}`, `${HOME-x}`, `${HOME:=x}`, `${HOME=x}`, `${HOME:?x}`, `${HOME?x}`) are
+            // still the home; any other operation (`${HOME%/*}` = the parent, `#…`, `/a/b`, `:n:m`, `:+`, `^`, `,`) is `*` (B RECHECK 12).
+            let home_op = (next == Some('{'))
+                .then(|| {
+                    homes.iter().find(|h| {
+                        name.get(..h.len()).is_some_and(|p| p.eq_ignore_ascii_case(h))
+                            && name.get(h.len()..).is_some_and(|r| r == "%/" || [":-", "-", ":=", "=", ":?", "?"].iter().any(|o| r.starts_with(o)))
+                    })
+                })
+                .flatten();
+            if let Some(h) = home_op {
+                out.push_str(&format!("${{{h}}}"));
+            } else if home {
+                out.extend(&c[i..end]);
+            } else {
+                out.push('*');
+            }
+            i = end;
+            continue;
+        }
+        if ch == '{' && !(i > 0 && c[i - 1] == '$') {
+            if let Some(k) = c[i..].iter().position(|&x| x == '}') {
+                out.push('*');
+                i += k + 1;
+                continue;
+            }
+        }
+        out.push(ch);
+        i += 1;
+    }
+    out
+}
+
+/// A relative glob whose folder is not known (after a folder move the parser could not follow): any component that could name
+/// `.olp` or `olp` = OLP's state, when the pattern starts with a dot or has at least one letter (so a bare `*` or `?` does not count).
+fn relative_glob_may_hit_olp(e: &str) -> bool {
+    e.split(['/', '\\']).filter(|c| c.contains(['*', '?', '['])).any(|c| {
+        (c.starts_with('.') || c.chars().any(|ch| ch.is_ascii_alphabetic())) && (pattern_may_match(c, ".olp") || pattern_may_match(c, "olp"))
+    })
+}
+
+/// The real words of a command the parser could not split (heredoc, `$( )`, `>( )`): quotes removed, `$`, `{` and `}` kept, split at
+/// blanks and `; | & < > ( )` (and backticks in Bash); the words of a `$( )` inside double quotes are words too. A word whose
+/// pattern characters were all quoted is a plain name, not a glob, and is left out (its `.olp` letters are still seen by
+/// `touches_self`). The same kind of words as a plain piece, so both paths judge a target the same way.
+fn raw_words(text: &str, ps: bool) -> Vec<String> {
+    let c: Vec<char> = text.chars().collect();
+    let mut out = Vec::new();
+    let mut w = String::new();
+    let (mut glob_q, mut glob_u) = (false, false);
+    let (mut sq, mut dq) = (false, false);
+    let esc = if ps { '`' } else { '\\' };
+    let mut flush = |w: &mut String, glob_q: &mut bool, glob_u: &mut bool| {
+        if !w.is_empty() && !(*glob_q && !*glob_u) {
+            out.push(std::mem::take(w));
+        }
+        w.clear();
+        *glob_q = false;
+        *glob_u = false;
+    };
+    let mut inner: Vec<String> = Vec::new();
+    let mut i = 0;
+    while i < c.len() {
+        let ch = c[i];
+        let pat = "*?[".contains(ch);
+        if sq {
+            if ch == '\'' {
+                sq = false;
+            } else {
+                glob_q |= pat;
+                w.push(ch);
+            }
+        } else if ch == esc && i + 1 < c.len() {
+            glob_q |= "*?[".contains(c[i + 1]);
+            w.push(c[i + 1]);
+            i += 1;
+        } else if dq {
+            if ch == '"' {
+                dq = false;
+            } else if ch == '$' && c.get(i + 1) == Some(&'(') {
+                // the command inside runs even within double quotes; its end is found with quotes respected (second review RECHECK 4)
+                let j = subst_end(&c, i + 2, ps);
+                let body: String = c[i + 2..j.min(c.len())].iter().collect();
+                inner.extend(raw_words(&body, ps));
+                w.push_str("$()");
+                i = j;
+            } else if !ps && ch == '`' {
+                // a backtick command inside double quotes runs too (second review RECHECK 4 of rel 622fe5781)
+                let mut j = i + 1;
+                while j < c.len() && c[j] != '`' {
+                    j += if c[j] == '\\' { 2 } else { 1 };
+                }
+                let body: String = c[i + 1..j.min(c.len())].iter().collect();
+                inner.extend(raw_words(&body, ps));
+                w.push_str("``");
+                i = j;
+            } else {
+                glob_q |= pat;
+                w.push(ch);
+            }
+        } else if ch == '\'' {
+            sq = true;
+        } else if ch == '"' {
+            dq = true;
+        } else if ch.is_whitespace() || ";|&<>()".contains(ch) || (!ps && ch == '`') {
+            flush(&mut w, &mut glob_q, &mut glob_u);
+        } else {
+            glob_u |= pat;
+            w.push(ch);
+        }
+        i += 1;
+    }
+    flush(&mut w, &mut glob_q, &mut glob_u);
+    out.extend(inner);
+    out
+}
+
+/// A second reading of a built command that does not track quotes at all: quote, backtick and backslash characters are dropped and the
+/// text is split at blanks and `; | & < > ( )`. A lone quote in a heredoc body or a comment (`don't`), or a `#` / `case` `)` inside
+/// `$( )`, can make the quote-aware reading see a later line as quoted; this reading never does, so the two together miss less (more
+/// asking, never less — second review RECHECK 5 of rel 80db1a4cc).
+fn blind_words(text: &str) -> Vec<String> {
+    text.split(|c: char| c.is_whitespace() || ";|&<>()".contains(c))
+        .map(|w| w.chars().filter(|c| !"'\"`\\".contains(*c)).collect::<String>())
+        .filter(|w| !w.is_empty())
+        .collect()
+}
+
+/// The index of the `)` that closes a `$(` whose inside starts at `from`, counting parentheses outside quotes only (like shell.rs);
+/// the text length when it is not closed.
+fn subst_end(c: &[char], from: usize, ps: bool) -> usize {
+    let esc = if ps { '`' } else { '\\' };
+    let (mut sq, mut dq) = (false, false);
+    let mut depth = 1;
+    let mut j = from;
+    while j < c.len() {
+        let x = c[j];
+        if sq {
+            sq = x != '\'';
+        } else if x == esc {
+            j += 1;
+        } else if dq {
+            dq = x != '"';
+        } else if x == '\'' {
+            sq = true;
+        } else if x == '"' {
+            dq = true;
+        } else if x == '(' {
+            depth += 1;
+        } else if x == ')' {
+            depth -= 1;
+            if depth == 0 {
+                return j;
+            }
+        }
+        j += 1;
+    }
+    c.len()
+}
+
+/// A glob that can only name folders above `<home>/olp` and `<home>/.olp` (`/*`, `/**`, `~/*` written in a heredoc body or a code
+/// comment): in a command that builds itself every word is judged, and such a word is mostly text, so it is left out there. Plain
+/// pieces still judge it as a target (second review RECHECK 3 of rel 61983f0d3, 1-b, without a second heredoc parser).
+fn glob_above_olp_only(w: &str, base: Option<&Path>) -> bool {
+    if !w.contains(['*', '?', '[']) {
+        return false;
+    }
+    let Some(e) = expand_home(w) else { return false };
+    let p = PathBuf::from(&e);
+    let abs = if p.is_absolute() || p.has_root() {
+        p
+    } else {
+        match base {
+            Some(b) => b.join(p),
+            None => return false,
+        }
+    };
+    let n = path_key(&normalize(&abs).to_string_lossy()).split('/').count();
+    olp_roots().iter().all(|r| n < r.split('/').count())
+}
+
+/// A word that moves the folder the rest runs in (`cd`, `pushd`, `Set-Location`, `env --chdir`, `-C dir`): after one, relative
+/// targets have no known folder.
+fn moves_folder(w: &str) -> bool {
+    let l = w.to_ascii_lowercase();
+    CD_VERBS.contains(&base(w).as_str()) || l.starts_with("cd..") || l.starts_with("cd\\") || l.starts_with("cd~") || l == "--chdir" || l.starts_with("--chdir=") || w.starts_with("-C") || w.starts_with("-D")
+}
+
+/// The words written right after `>` / `>>` / `2>` / `&>` outside quotes in the raw text (quotes around the word removed). Used only for
+/// targets the parser could not name; `>&2`-style duplications have no word.
+fn redirect_words(cmd: &str) -> Vec<String> {
+    let c: Vec<char> = cmd.chars().collect();
+    let mut out = Vec::new();
+    let (mut sq, mut dq) = (false, false);
+    let mut i = 0;
+    while i < c.len() {
+        let ch = c[i];
+        if sq {
+            sq = ch != '\'';
+        } else if dq {
+            dq = ch != '"';
+        } else if ch == '\'' {
+            sq = true;
+        } else if ch == '"' {
+            dq = true;
+        } else if ch == '>' {
+            while i + 1 < c.len() && (c[i + 1] == '>' || c[i + 1] == '|') {
+                i += 1;
+            }
+            if i + 1 < c.len() && c[i + 1] == '&' {
+                i += 1;
+                continue;
+            }
+            while i + 1 < c.len() && c[i + 1].is_whitespace() {
+                i += 1;
+            }
+            let mut w = String::new();
+            let (mut wsq, mut wdq) = (false, false);
+            while i + 1 < c.len() {
+                let n = c[i + 1];
+                if !wsq && !wdq && (n.is_whitespace() || ";|&<>()".contains(n)) {
+                    break;
+                }
+                i += 1;
+                match n {
+                    '\'' if !wdq => wsq = !wsq,
+                    '"' if !wsq => wdq = !wdq,
+                    _ => w.push(n),
+                }
+            }
+            if !w.is_empty() {
+                out.push(w);
+            }
+        }
+        i += 1;
+    }
+    out
+}
+
+thread_local! {
+    /// Links resolved during one judgement (`assess_shell` empties it first): the disk does not change while one command is judged, and
+    /// many checks resolve the same target (rc CI run 43724580621 fix — relative targets now reach the disk for every word).
+    static RESOLVED: std::cell::RefCell<std::collections::HashMap<PathBuf, Option<PathBuf>>> = std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// The existing part of the path with every link resolved on disk, the rest appended; None when an existing link cannot be resolved.
+fn resolve_links(abs: &Path) -> Option<PathBuf> {
+    if let Some(hit) = RESOLVED.with(|m| m.borrow().get(abs).cloned()) {
+        return hit;
+    }
+    let r = resolve_links_now(abs);
+    RESOLVED.with(|m| m.borrow_mut().insert(abs.to_path_buf(), r.clone()));
+    r
+}
+
+fn resolve_links_now(abs: &Path) -> Option<PathBuf> {
+    let mut rest: Vec<std::ffi::OsString> = Vec::new();
+    let mut cur = abs.to_path_buf();
+    loop {
+        if std::fs::symlink_metadata(&cur).is_ok() {
+            let mut real = std::fs::canonicalize(&cur).ok()?;
+            for c in rest.iter().rev() {
+                real.push(c);
+            }
+            return Some(real);
+        }
+        let name = cur.file_name()?.to_os_string();
+        rest.push(name);
+        if !cur.pop() {
+            return Some(abs.to_path_buf());
+        }
+    }
+}
+
+/// Could the glob pattern (absolute, normalised) name `<home>/olp` or `<home>/.olp`, or something inside or above them? Component by
+/// component with `*`, `?` and `[...]`. A leading dot is matched by wildcards too: PowerShell does so, and so does Bash with
+/// `dotglob` (B RECHECK 5 condition 1 — the protecting side).
+fn glob_may_hit_olp(pattern: &Path) -> bool {
+    // the pattern keeps its letter case (design addendum 3); the matcher folds case when it compares
+    let pat = path_key_cased(&pattern.to_string_lossy());
+    let pat: Vec<&str> = pat.split('/').collect();
+    olp_roots().iter().any(|root| {
+        let root: Vec<&str> = root.split('/').collect();
+        pat.iter().zip(root.iter()).all(|(p, r)| pattern_may_match(p, r))
+    })
+}
+
+/// Design addendum 2 of 11-15: the one matcher for every expansion the shell does from the text alone. Could `pattern` (one name,
+/// no `/`) name `literal`? Braces are expanded first (`{a,b}`, `{x..y}` numbers or letters, at most `BRACE_CAP` results), then each
+/// result is read as a glob: `*`, `?`, `[..]` (ranges, `!`/`^`, POSIX classes `[[:lower:]]`; sets are compared in both letter
+/// cases), extended globs `?( *( +( @( !(` (`!(..)` = anything), and the same text without extended globs (PowerShell, or bash
+/// without `extglob`) — either reading that can match is a match. A negated set is any one letter (PowerShell reads `[!o]` as the
+/// set `!`,`o`). A part it cannot read (an open `[`, an open extended glob, a `{x..y}` that is not a range, more brace results than
+/// `BRACE_CAP`, a match that takes too many steps) reaches the name unless the letters before it already differ from the name
+/// (addendum 2-1: `~/x[l` does not reach; `~/.o[l` and, at the very front of a piece, `~/[.o` do). A number range over the cap is
+/// read as digits (`[-0-9]*`), so `file{1..300}.txt` stays ordinary.
+fn pattern_may_match(pattern: &str, literal: &str) -> bool {
+    may_match(pattern, literal, true)
+}
+
+/// `pattern_may_match` with `lead` = whether an unreadable part at the very front reaches. Only `names_trust_folder` passes
+/// `false`, for word parts that are not in a path place (the first piece of a word, or a piece cut at every separator), so code
+/// text such as `a=[a, 1]` is not read as a path — addendum 2's hidden-name place condition, not a change to 2-1 (a).
+fn may_match(pattern: &str, literal: &str, lead: bool) -> bool {
+    let lit: Vec<char> = literal.chars().collect();
+    let mut st = Steps { left: MATCH_BUDGET, lead };
+    brace_expand(pattern).iter().any(|p| {
+        let c: Vec<char> = p.chars().collect();
+        [true, false].into_iter().any(|ext| glob_match(&parse_glob(&c, ext), &lit, 0, lit.len(), &mut st))
+    })
+}
+
+/// Matching steps left, and whether an unreadable part at the very front reaches.
+struct Steps {
+    left: u32,
+    lead: bool,
+}
+
+/// Most results one brace expansion gives before the rest counts as unreadable.
+const BRACE_CAP: usize = 256;
+/// Most matching steps before the match counts as unreadable (`*` repeated many times).
+const MATCH_BUDGET: u32 = 200_000;
+/// Stands for a part `brace_expand` could not read; `parse_glob` turns it into `G::Unknown`.
+const UNREADABLE: char = '\u{1}';
+
+enum G {
+    Lit(char),
+    One,
+    Star,
+    Set(Vec<SetItem>),
+    Ext(char, Vec<Vec<G>>),
+    Unknown,
+}
+
+enum SetItem {
+    Ch(char),
+    Range(char, char),
+    Class(String),
+    Any,
+}
+
+/// `{a,b}` and `{x..y[..step]}` expanded the way bash does (not after `$`); an unclosed `{` or one with neither a comma nor `..`
+/// is a plain letter. A `{x..y}` that is not a number or one-letter range, or more than `BRACE_CAP` results, is `UNREADABLE`.
+fn brace_expand(w: &str) -> Vec<String> {
+    let c: Vec<char> = w.chars().collect();
+    let mut i = 0;
+    while i < c.len() {
+        if c[i] == '{' && !(i > 0 && c[i - 1] == '$') {
+            if let Some(close) = matching_brace(&c, i) {
+                let inner: String = c[i + 1..close].iter().collect();
+                if let Some(alts) = brace_alternatives(&inner) {
+                    let pre: String = c[..i].iter().collect();
+                    let post: String = c[close + 1..].iter().collect();
+                    let mut out = Vec::new();
+                    for a in alts {
+                        for t in brace_expand(&format!("{a}{post}")) {
+                            out.push(format!("{pre}{t}"));
+                            if out.len() > BRACE_CAP {
+                                // too many to list (design addendum 3): keep the letters that can come first, then anything —
+                                // only up to the end of this path piece; the pieces after it are expanded and read as before
+                                // (second review R15: `~/{a..z}{a..z}/../{.o,x}lp` must still show `.olp`)
+                                let j = piece_end(&c, i);
+                                let piece: String = c[i..j].iter().collect();
+                                let after: String = c[j..].iter().collect();
+                                let tail = first_letters(&piece, 0).map_or_else(|| UNREADABLE.to_string(), |s| letter_set(&s));
+                                return brace_expand(&format!("{pre}{tail}{after}"));
+                            }
+                        }
+                    }
+                    return out;
+                }
+            }
+        }
+        i += 1;
+    }
+    vec![w.to_string()]
+}
+
+/// The index of the first `/` or `\` at or after `from` that is outside braces (the end of this path piece), or the text length.
+fn piece_end(c: &[char], from: usize) -> usize {
+    let mut depth = 0i32;
+    for (k, &x) in c.iter().enumerate().skip(from) {
+        match x {
+            '{' => depth += 1,
+            '}' => depth -= 1,
+            '/' | '\\' if depth <= 0 => return k,
+            _ => {}
+        }
+    }
+    c.len()
+}
+
+/// Deepest brace nesting `first_letters` follows before the letters count as unknown.
+const BRACE_DEPTH: usize = 8;
+/// What the over-cap number range reads as (`brace_alternatives`).
+const NUMBER_RUN: &str = "[-0-9]*";
+
+/// The letters the brace expansion of `s` can start with, without listing it (design addendum 3). `None` = not known: the text
+/// can be empty there, starts with a pattern letter (`*`, `?`, `[`, an extended glob), a `\`, something unreadable, or the
+/// braces nest deeper than `BRACE_DEPTH`.
+fn first_letters(s: &str, depth: usize) -> Option<Vec<char>> {
+    if depth > BRACE_DEPTH {
+        return None;
+    }
+    let c: Vec<char> = s.chars().collect();
+    let first = *c.first()?;
+    if first == '{' {
+        if let Some(close) = matching_brace(&c, 0) {
+            let inner: String = c[1..close].iter().collect();
+            if let Some(alts) = brace_alternatives(&inner) {
+                let post: String = c[close + 1..].iter().collect();
+                let mut out = Vec::new();
+                for a in alts {
+                    if a == NUMBER_RUN {
+                        out.extend("-0123456789".chars());
+                        continue;
+                    }
+                    out.extend(first_letters(&format!("{a}{post}"), depth + 1)?);
+                }
+                return Some(out);
+            }
+        }
+        return Some(vec!['{']);
+    }
+    let ext_open = "?*+@!".contains(first) && c.get(1) == Some(&'(');
+    if ext_open || "*?[\\".contains(first) || first == UNREADABLE {
+        return None;
+    }
+    Some(vec![first])
+}
+
+/// The letters as one glob set followed by `*` (`[.a]*`), or `UNREADABLE` when a letter cannot sit in a set safely.
+fn letter_set(letters: &[char]) -> String {
+    let mut l: Vec<char> = letters.to_vec();
+    l.sort_unstable();
+    l.dedup();
+    if l.is_empty() || l.iter().any(|ch| "]!^[\\/".contains(*ch) || *ch == UNREADABLE) {
+        return UNREADABLE.to_string();
+    }
+    // `-` last so it is a letter, not a range
+    let dash = l.contains(&'-');
+    let mut set: String = l.into_iter().filter(|ch| *ch != '-').collect();
+    if dash {
+        set.push('-');
+    }
+    format!("[{set}]*")
+}
+
+fn matching_brace(c: &[char], open: usize) -> Option<usize> {
+    let mut depth = 0;
+    for (k, &x) in c.iter().enumerate().skip(open) {
+        match x {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(k);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// The results of one brace group's inside, or `None` when it is not a brace expression (then `{` is a plain letter).
+fn brace_alternatives(inner: &str) -> Option<Vec<String>> {
+    let mut parts = vec![String::new()];
+    let mut depth = 0;
+    for ch in inner.chars() {
+        match ch {
+            '{' => depth += 1,
+            '}' => depth -= 1,
+            ',' if depth == 0 => {
+                parts.push(String::new());
+                continue;
+            }
+            _ => {}
+        }
+        if let Some(last) = parts.last_mut() {
+            last.push(ch);
+        }
+    }
+    if parts.len() >= 2 {
+        return Some(parts);
+    }
+    if !inner.contains("..") {
+        return None;
+    }
+    let unreadable = Some(vec![UNREADABLE.to_string()]);
+    let seq: Vec<&str> = inner.split("..").collect();
+    if !(2..=3).contains(&seq.len()) {
+        return unreadable;
+    }
+    let step = match seq.get(2) {
+        Some(s) => match s.parse::<i64>() {
+            Ok(n) if n != 0 => n.unsigned_abs(),
+            Ok(_) => 1,
+            Err(_) => return unreadable,
+        },
+        None => 1,
+    };
+    let count = |lo: i64, hi: i64| lo.abs_diff(hi) / step + 1;
+    if let (Ok(a), Ok(b)) = (seq[0].parse::<i64>(), seq[1].parse::<i64>()) {
+        if count(a, b) > BRACE_CAP as u64 {
+            // numbers only: a sign or digit first, read as `[-0-9]*` (never a dot)
+            return Some(vec!["[-0-9]*".to_string()]);
+        }
+        let pad = [seq[0], seq[1]].iter().any(|s| s.trim_start_matches('-').len() > 1 && s.trim_start_matches('-').starts_with('0'));
+        let width = if pad { seq[0].len().max(seq[1].len()) } else { 0 };
+        let dir: i64 = if b >= a { 1 } else { -1 };
+        return Some((0..count(a, b) as i64).map(|k| format!("{:0width$}", a + dir * k * step as i64)).collect());
+    }
+    let (a, b): (Vec<char>, Vec<char>) = (seq[0].chars().collect(), seq[1].chars().collect());
+    if a.len() == 1 && b.len() == 1 && a[0].is_ascii() && b[0].is_ascii() {
+        let (a, b) = (a[0] as i64, b[0] as i64);
+        let dir: i64 = if b >= a { 1 } else { -1 };
+        return Some((0..count(a, b) as i64).filter_map(|k| u32::try_from(a + dir * k * step as i64).ok().and_then(char::from_u32)).map(String::from).collect());
+    }
+    unreadable
+}
+
+/// One name read as a glob; `ext` = extended globs are read too. Reading stops at the first part that cannot be read (`G::Unknown`).
+fn parse_glob(c: &[char], ext: bool) -> Vec<G> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < c.len() {
+        let ch = c[i];
+        if ch == UNREADABLE {
+            out.push(G::Unknown);
+            return out;
+        }
+        if ext && "?*+@!".contains(ch) && c.get(i + 1) == Some(&'(') {
+            match parse_ext_group(c, i + 2) {
+                Some((alts, next)) => {
+                    out.push(G::Ext(ch, alts));
+                    i = next;
+                    continue;
+                }
+                None => {
+                    out.push(G::Unknown);
+                    return out;
+                }
+            }
+        }
+        match ch {
+            '*' => {
+                if !matches!(out.last(), Some(G::Star)) {
+                    out.push(G::Star);
+                }
+            }
+            '?' => out.push(G::One),
+            '[' => match parse_set(c, i + 1) {
+                Some((g, next)) => {
+                    out.push(g);
+                    i = next;
+                    continue;
+                }
+                None => {
+                    out.push(G::Unknown);
+                    return out;
+                }
+            },
+            _ => out.push(G::Lit(ch)),
+        }
+        i += 1;
+    }
+    out
+}
+
+/// The `|`-separated choices of an extended glob whose inside starts at `from`, and the index after its `)`; `None` when not closed.
+fn parse_ext_group(c: &[char], from: usize) -> Option<(Vec<Vec<G>>, usize)> {
+    let mut depth = 1;
+    let mut alts = Vec::new();
+    let mut start = from;
+    for (k, &x) in c.iter().enumerate().skip(from) {
+        match x {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    alts.push(parse_glob(&c[start..k], true));
+                    return Some((alts, k + 1));
+                }
+            }
+            '|' if depth == 1 => {
+                alts.push(parse_glob(&c[start..k], true));
+                start = k + 1;
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// A bracket set whose inside starts at `from`, and the index after its `]`; `None` when not closed. A negated set is `G::One`.
+fn parse_set(c: &[char], from: usize) -> Option<(G, usize)> {
+    let mut j = from;
+    let neg = matches!(c.get(j), Some('!' | '^'));
+    if neg {
+        j += 1;
+    }
+    let mut items = Vec::new();
+    let mut first = true;
+    loop {
+        let ch = *c.get(j)?;
+        if ch == ']' && !first {
+            break;
+        }
+        first = false;
+        if ch == '[' {
+            if let Some(&d @ (':' | '=' | '.')) = c.get(j + 1) {
+                if let Some(k) = (j + 2..c.len().saturating_sub(1)).find(|&k| c[k] == d && c[k + 1] == ']') {
+                    let name: String = c[j + 2..k].iter().collect();
+                    items.push(if d == ':' { SetItem::Class(name) } else { SetItem::Any });
+                    j = k + 2;
+                    continue;
+                }
+            }
+        }
+        if c.get(j + 1) == Some(&'-') && c.get(j + 2).is_some_and(|x| *x != ']') {
+            items.push(SetItem::Range(ch, c[j + 2]));
+            j += 3;
+            continue;
+        }
+        items.push(SetItem::Ch(ch));
+        j += 1;
+    }
+    Some((if neg { G::One } else { G::Set(items) }, j + 1))
+}
+
+/// The same letter when letter case is folded the Unicode way (`Ö` = `ö`), as Windows and macOS do for file names (second review R15).
+fn same_letter(a: char, b: char) -> bool {
+    a == b || a.to_lowercase().eq(b.to_lowercase())
+}
+
+fn set_has(items: &[SetItem], x: char) -> bool {
+    // the letter in both cases, Unicode way (single-letter case forms only)
+    let one = |mut it: std::char::ToLowercase| it.next().filter(|_| it.next().is_none());
+    let up = |mut it: std::char::ToUppercase| it.next().filter(|_| it.next().is_none());
+    [Some(x), one(x.to_lowercase()), up(x.to_uppercase())].into_iter().flatten().any(|y| {
+        items.iter().any(|it| match it {
+            SetItem::Ch(a) => *a == y,
+            SetItem::Range(a, b) => *a <= y && y <= *b,
+            SetItem::Any => true,
+            SetItem::Class(n) => match n.as_str() {
+                "alpha" => y.is_alphabetic(),
+                "digit" => y.is_ascii_digit(),
+                "alnum" => y.is_alphanumeric(),
+                "upper" => y.is_uppercase(),
+                "lower" => y.is_lowercase(),
+                "space" => y.is_whitespace(),
+                "blank" => y == ' ' || y == '\t',
+                "punct" => y.is_ascii_punctuation(),
+                "print" => !y.is_control(),
+                "graph" => !y.is_control() && !y.is_whitespace(),
+                "cntrl" => y.is_control(),
+                "xdigit" => y.is_ascii_hexdigit(),
+                "word" => y.is_alphanumeric() || y == '_',
+                _ => true,
+            },
+        })
+    })
+}
+
+/// Does `p` match all of `s[i..end]`? `G::Unknown` reaches when the part before it matched — something (`i > 0`), or nothing
+/// at all when `lead` (addendum 2-1 (a)); running out of steps reaches.
+fn glob_match(p: &[G], s: &[char], i: usize, end: usize, budget: &mut Steps) -> bool {
+    if budget.left == 0 {
+        return true;
+    }
+    budget.left -= 1;
+    match p.first() {
+        None => i == end,
+        Some(G::Unknown) => i > 0 || budget.lead,
+        Some(G::Star) => (i..=end).any(|k| glob_match(&p[1..], s, k, end, budget)),
+        Some(G::One) => i < end && glob_match(&p[1..], s, i + 1, end, budget),
+        // letter case is folded here, when comparing — never by lower-casing the pattern first (design addendum 3: `[Z-p]`)
+        Some(G::Lit(c)) => i < end && same_letter(s[i], *c) && glob_match(&p[1..], s, i + 1, end, budget),
+        Some(G::Set(items)) => i < end && set_has(items, s[i]) && glob_match(&p[1..], s, i + 1, end, budget),
+        Some(G::Ext(op, alts)) => (i..=end).any(|k| ext_match(*op, alts, s, i, k, budget) && glob_match(&p[1..], s, k, end, budget)),
+    }
+}
+
+/// Does the extended glob `op(alts)` match all of `s[i..k]`? `!(..)` matches anything (the closed side).
+fn ext_match(op: char, alts: &[Vec<G>], s: &[char], i: usize, k: usize, budget: &mut Steps) -> bool {
+    match op {
+        '!' => true,
+        '@' => alts.iter().any(|a| glob_match(a, s, i, k, budget)),
+        '?' => i == k || alts.iter().any(|a| glob_match(a, s, i, k, budget)),
+        '*' => i == k || ext_repeat(alts, s, i, k, budget),
+        _ => ext_repeat(alts, s, i, k, budget),
+    }
+}
+
+/// One or more choices of `alts` one after another match all of `s[i..k]`.
+fn ext_repeat(alts: &[Vec<G>], s: &[char], i: usize, k: usize, budget: &mut Steps) -> bool {
+    if i == k {
+        return alts.iter().any(|a| glob_match(a, s, i, i, budget));
+    }
+    (i + 1..=k).any(|m| alts.iter().any(|a| glob_match(a, s, i, m, budget)) && (m == k || ext_repeat(alts, s, m, k, budget)))
+}
+
+/// `<home>/olp` and `<home>/.olp` as comparison keys, for HOME and USERPROFILE, as written and with links resolved.
+fn olp_roots() -> Vec<String> {
+    // the roots depend only on HOME and USERPROFILE: kept per thread for the same values (each canonicalize of the home is a disk call,
+    // and one command judges many targets — rc CI run 43724580621 fix made relative targets reach this for every word)
+    thread_local!(static ROOTS: std::cell::RefCell<Option<(Option<std::ffi::OsString>, Option<std::ffi::OsString>, Vec<String>)>> = const { std::cell::RefCell::new(None) });
+    let key = (std::env::var_os("HOME"), std::env::var_os("USERPROFILE"));
+    if let Some(v) = ROOTS.with(|r| r.borrow().as_ref().filter(|c| c.0 == key.0 && c.1 == key.1).map(|c| c.2.clone())) {
+        return v;
+    }
+    let v = olp_roots_now();
+    ROOTS.with(|r| *r.borrow_mut() = Some((key.0, key.1, v.clone())));
+    v
+}
+
+fn olp_roots_now() -> Vec<String> {
+    let mut out = Vec::new();
+    for h in [std::env::var_os("HOME"), std::env::var_os("USERPROFILE")].into_iter().flatten().filter(|h| !h.is_empty()) {
+        let h = PathBuf::from(h);
+        for base in [Some(h.clone()), std::fs::canonicalize(&h).ok()].into_iter().flatten() {
+            for name in ["olp", ".olp"] {
+                let k = path_key(&base.join(name).to_string_lossy());
+                if !out.contains(&k) {
+                    out.push(k);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Does the command name a path component that is exactly `olp` or `.olp` (`~/olp`, `'olp\..'`, `x/.olp/y`)? A name that only
+/// contains the letters (`olp-hook`, `olp_cache`, `~nobody_olp`) does not count.
+fn mentions_olp_component(ctx: &str) -> bool {
+    ctx.split(|c: char| c == '/' || c == '\\' || c.is_whitespace() || "\"'`;&|<>=(),+{}$".contains(c))
+        .any(|w| w.eq_ignore_ascii_case("olp") || w.eq_ignore_ascii_case(".olp"))
+}
+
+/// `words` are the piece's real words (quotes removed, `$`, `{`, `}` kept), so a path like `${USERPROFILE}/olp/x` is resolved whole.
+/// A piece with parentheses or backticks builds its arguments at run time (`Join-Path $env:USERPROFILE 'olp'`): it cannot be resolved
+/// word by word, so an `olp` component anywhere in the command makes it OLP's state.
+fn touches_self_at(words: &[String], base: Option<&Path>, ctx: &str) -> bool {
+    if ctx.contains(['(', ')', '`']) && mentions_olp_component(ctx) {
+        return true;
+    }
+    words.iter().any(|w| base_name_is_hook(w) || target_is_olp_state(w, base, ctx))
+}
+
+fn base_name_is_hook(w: &str) -> bool {
+    base(w) == "olp-hook"
+}
+
+/// Home variables replaced by their values; None when another `$`, `%` or backtick remains (cannot be resolved).
+fn expand_home(t: &str) -> Option<String> {
+    let home = crate::store::home().map(|h| h.to_string_lossy().to_string());
+    let env_home = std::env::var("HOME").ok().filter(|h| !h.is_empty()).or_else(|| home.clone());
+    let env_profile = std::env::var("USERPROFILE").ok().filter(|h| !h.is_empty()).or_else(|| home.clone());
+    let mut s = t.to_string();
+    if s == "~" || s.starts_with("~/") || s.starts_with("~\\") {
+        s = format!("{}{}", home.clone()?, &s[1..]);
+    } else if s.starts_with('~') {
+        return None; // `~user`: another user's home, not resolved here
+    }
+    for (var, val) in [
+        ("${USERPROFILE}", &env_profile),
+        ("$USERPROFILE", &env_profile),
+        ("%USERPROFILE%", &env_profile),
+        ("${env:USERPROFILE}", &env_profile),
+        ("$env:USERPROFILE", &env_profile),
+        ("${HOME}", &env_home),
+        ("$HOME", &env_home),
+        ("%HOME%", &env_home),
+        ("$env:HOME", &env_home),
+    ] {
+        let lower = s.to_ascii_lowercase();
+        if let Some(at) = lower.find(&var.to_ascii_lowercase()) {
+            s = format!("{}{}{}", &s[..at], val.clone()?, &s[at + var.len()..]);
+        }
+    }
+    (!s.contains(['$', '%', '`'])).then_some(s)
+}
+
+/// Lexical normalisation: `.` dropped, `..` pops a component, no disk access (the target may not exist yet).
+fn normalize(p: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for c in p.components() {
+        match c {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
+
+/// A path as text for comparison: `/` slashes, Git Bash `/c/...` written as `c:/...`, lower case on Windows.
+fn path_key(p: &str) -> String {
+    let s = path_key_cased(p);
+    if cfg!(windows) {
+        s.to_lowercase()
+    } else {
+        s
+    }
+}
+
+/// `path_key` without lower-casing: for a glob pattern, whose ranges must keep the letters as written (`[Z-p]`).
+fn path_key_cased(p: &str) -> String {
+    let mut s = p.replace('\\', "/");
+    if let Some(r) = s.strip_prefix("//?/") {
+        s = r.to_string();
+    }
+    let b = s.as_bytes();
+    if b.len() >= 3 && b[0] == b'/' && b[1].is_ascii_alphabetic() && b[2] == b'/' {
+        s = format!("{}:{}", &s[1..2], &s[2..]);
+    }
+    s.trim_end_matches('/').to_string()
+}
+
+/// Is the normalised absolute path at or under `<home>/olp` or `<home>/.olp` (see olp_roots)?
+fn under_olp_root(p: &Path) -> bool {
+    let target = path_key(&p.to_string_lossy());
+    olp_roots().iter().any(|root| target == *root || target.starts_with(&format!("{root}/")))
+}
+
 
 fn is_null_sink(t: &str) -> bool {
     NULL_SINKS.contains(&t.to_lowercase().as_str())
@@ -574,7 +1844,7 @@ fn count_or_unknown(unit: Unit, r: Result<u64, &'static str>) -> Count {
     }
 }
 
-const NO_LIMIT: &str = "no time limit set in .olp/hook-config.json";
+const NO_LIMIT: &str = "no time limit set in your hook-config.json";
 const CHANGES_FOLDER: &str = "the command changes folder first";
 const FOLDER_NOT_FOUND: &str = "the folder it changes to was not found";
 /// Commands that change directory (by first word). Only a literal `cd <one word> &&` is followed; anything else is not counted.
@@ -638,7 +1908,12 @@ fn ps_after_cd(dir: &Dir, seg: &Segment) -> Dir {
 
 /// If the base directory is inside `.olp`, protect it.
 fn dir_in_olp(dir: &Dir) -> bool {
-    matches!(dir, Dir::Known { path, moved: true } if path.components().any(|c| c.as_os_str() == ".olp"))
+    match dir {
+        Dir::Known { path, moved: true } if path.components().any(|c| c.as_os_str() == ".olp") => true,
+        // the working folder (moved or not) inside the user folder `<home>/olp` (rev 17-3)
+        Dir::Known { path, .. } => under_olp_root(&normalize(path)),
+        _ => false,
+    }
 }
 
 /// Count for one danger kind. Counted only for the direct form (first word is that verb); everything else is unknown.
@@ -692,12 +1967,22 @@ fn count_for(kind: Kind, words: &[String], seg: &Segment, entry: Option<&Entry>,
             None => Count::unknown(unit, "remote and branch are not both given"),
         },
         Kind::GitResetHard if w0 == "git" && w.get(1).map(|s| s == "reset").unwrap_or(false) => count_or_unknown(unit, counter::count_uncommitted_changes(cwd, deadline)),
+        Kind::FileDelete if runtime_target(w) => Count::unknown(unit, RUNTIME_TARGET),
         _ => Count::unknown(unit, "this form is not counted"),
     }
 }
 
+/// A delete inside a `sh`/`bash`/`zsh`/`dash` `-c` script whose target is a `$` value (also after `xargs` or `find -exec`): the target is only known when it runs.
+fn runtime_target(w: &[String]) -> bool {
+    w.windows(3).any(|t| {
+        ["sh", "bash", "zsh", "dash"].contains(&base(&t[0]).as_str()) && t[1] == "-c" && t[2].contains('$') && detect_dangers(&shell::deep_words([t[2].as_str()])).contains(&Kind::FileDelete)
+    })
+}
+
 const PATTERNS: &str = "the paths use patterns or variables";
 const NOT_COUNTED: &str = "this form is not counted";
+/// 0.1.3 ⑥-a reason (same `count not checked (reason)` frame, card.rs unchanged). Wording pending the two native-speaker checks (REVIEW_013_DESIGN_RULES Q4).
+const RUNTIME_TARGET: &str = "the target is only known at run time";
 
 /// Path arguments of PowerShell `Remove-Item` (including aliases). Only known switches, `-Path`/`-LiteralPath` values and `-ErrorAction`-style values are skipped over;
 /// other parameters (-WhatIf, -Filter, -Include, -Exclude, etc.), cmd-style `/s` and piped input (no path) are not counted (no invented numbers). Comma arrays are split by `ps_split_commas`.
@@ -945,10 +2230,176 @@ pub fn assess_bash(cmd: &str, map: &DeviceMap, cwd: &Path, limits: Limits) -> As
 }
 
 /// `ps` = PowerShell tool: backslash paths, Remove-Item counting, read cmdlets. Following `cd <dir> &&` is Bash only (PowerShell is never counted).
+/// A command with `#` (a comment for the shell, where a lone quote such as `don't` is not a quote) is also judged on the reading that
+/// does not track quotes, so a comment never hides the next line from self-protection (B RECHECK 8 of rel e430fd0d5; more asking only).
 fn assess_shell(cmd: &str, map: &DeviceMap, cwd: &Path, limits: Limits, ps: bool) -> Assessment {
+    RESOLVED.with(|m| m.borrow_mut().clear());
+    let mut a = assess_shell_parsed(cmd, map, cwd, limits, ps);
+    if !a.self_guard && cmd.contains('#') && !proven_reads_only(cmd, ps) {
+        let base = built_base(cmd, cwd, ps);
+        let words: Vec<String> = blind_words(cmd).into_iter().filter(|w| !glob_above_olp_only(w, base)).collect();
+        a.self_guard = self_guard(&words, base, cmd);
+    }
+    // One rule for every place a trust-folder path can sit (a value, a `cd` argument, a link source, joined strings): a command that
+    // writes (a danger kind was found, or it builds itself) and whose whole text, once quotes and string joins are undone, names `.olp`
+    // is self-protection (second review RECHECK 9 coord side of rel 2f6d4fcf4 — the fifth miss of the same kind, so one rule instead
+    // of one more shape). Reading the folder (`cat`, `ls`) is not a write and is left alone (B RECHECK 14 condition 2).
+    // The design addendum of 11-15: the name (or a glob that can name it) seen anywhere = self-protection unless the
+    // command is proven to be reads only — reads are proven, writes are never searched for (the five misses came from adding write shapes).
+    let reads_only = proven_reads_only(cmd, ps);
+    if !a.self_guard && names_trust_folder(&flattened(cmd, ps)) && !reads_only {
+        a.self_guard = true;
+    }
+    // the other side of the same rule: a command proven to be reads only is never self-protection, whatever an earlier word check said
+    // (`jq . ~/.olp/…`, second review RECHECK 11)
+    if reads_only {
+        a.self_guard = false;
+    }
+    a
+}
+
+/// Does the flattened text name the trust folder: `.olp` anywhere, or a word part that, as a glob, can name `.olp` and either has a
+/// letter (`.o*`, `.ol?`, `.[o]lp`) or starts with a dot (`.*`, `.???` — second review RECHECK 11)? A bare `*` or `?` does not count.
+/// Design addendum 2 of 11-15: the word parts are judged twice and either can reach — cut at every separator as before, and
+/// whole (braces expanded over the whole word, then cut at `/`, `\` and `=`), so `{.o,x}lp`, `.{o..o}lp`, `.[[:lower:]]lp` and
+/// `.@(o)lp` reach `pattern_may_match` as written.
+/// Addendum 2-1 (a): a piece after a `/` or `\` in the same word part (a path place: `~/[.o`, `$HOME\[[:lower:]lp`, `~/` + more
+/// brace results than the cap) reaches when its very front cannot be read. The first piece of a word part (after a blank or `=`)
+/// and the pieces cut at every separator are not path places, so code text (`a=[a, 1]`, `echo '[a,'`) stays ordinary.
+/// Design addendum 3: the word parts keep their letter case (`[Z-p]` holds `o`); only the plain `.olp` look-up is lower-cased, and
+/// the matcher folds case when it compares.
+fn names_trust_folder(flat: &str) -> bool {
+    let may_name = |w: &str, path: bool| {
+        (w.starts_with('.') || w.chars().any(|c| c.is_ascii_alphabetic()) || (path && w.starts_with([UNREADABLE, '['])))
+            && may_match(w, ".olp", path)
+    };
+    let l = flat;
+    flat.to_ascii_lowercase().contains(".olp")
+        || l.split(|c: char| c.is_whitespace() || "/\\;|&<>()=:,{}$".contains(c)).any(|w| w.contains(['*', '?', '[']) && may_name(w, false))
+        || l.split(|c: char| c.is_whitespace() || ";|&<>".contains(c)).any(|word| {
+            brace_expand(word).iter().any(|e| {
+                e.split('=').any(|part| part.split(['/', '\\']).enumerate().any(|(k, w)| !w.is_empty() && may_name(w, k > 0)))
+            })
+        })
+}
+
+/// Commands that only read files (the design addendum's closed list). Anything not on it is not a read.
+/// (`file -C` writes a magic file: not on the list. `less`/`more` are, but never with a log-file option `-o`/`-O`/`--log-file`.)
+const READ_ONLY_BASH: &[&str] = &["cat", "ls", "head", "tail", "grep", "egrep", "fgrep", "rg", "wc", "stat", "type", "sha256sum", "md5sum", "jq", "echo", "less", "more"];
+/// `git` subcommands that only read (with no `--output`); every other git use is not a read.
+const READ_ONLY_GIT: &[&str] = &["log", "show", "diff", "status", "blame", "ls-files"];
+const READ_ONLY_PS: &[&str] = &["get-content", "gc", "cat", "type", "get-childitem", "gci", "dir", "ls", "get-item", "gi", "test-path", "select-string", "sls", "resolve-path", "measure-object", "get-filehash"];
+
+/// The whole command is reads only: no subshell, substitution, heredoc or backtick, and every piece is a command on the closed read list
+/// with no redirect, no assignment and no folder change. Pipes between reads are fine.
+fn proven_reads_only(cmd: &str, ps: bool) -> bool {
+    let parsed = if ps { shell::parse_ps(cmd) } else { shell::parse(cmd) };
+    if parsed.complex || !parsed.substs.is_empty() || cmd.contains(['`', '(', ')']) && !ps || cmd.contains("<<") {
+        return false;
+    }
+    // a comment with a quote or a second line can hide the next line from the parser (B RECHECK 8): never proven reads only
+    if cmd.contains('#') && (cmd.contains(['\n', '\r', '\'', '"'])) {
+        return false;
+    }
+    let list = if ps { READ_ONLY_PS } else { READ_ONLY_BASH };
+    parsed.segments.iter().all(|seg| {
+        let words: Vec<&str> = seg.words.iter().map(|w| w.text.as_str()).collect();
+        let Some(first) = words.first() else { return true };
+        seg.redirects.iter().all(|r| r.as_deref().is_some_and(is_null_sink))
+            && !first.contains('=')
+            // an option that runs or writes something (`grep --pre`, `rg --pre`, `--output`, `-exec`) is never a read
+            && !words.iter().any(|w| w.starts_with("--pre") || w.starts_with("--output") || w.starts_with("-exec") || w.starts_with("--exec"))
+            // less/more: a log-file option, also inside a bundle (`-So`, `-SO`), or a `+` start-up command is never a read
+            && !(matches!(base(first).as_str(), "less" | "more")
+                && words[1..].iter().any(|w| {
+                    w.starts_with('+') || w.to_ascii_lowercase().starts_with("--log") || (w.starts_with('-') && !w.starts_with("--") && w.contains(['o', 'O']))
+                }))
+            // rg: options that run another program (`--hostname-bin`, `--pre`, `--search-zip`/`-z` decompressors) are never a read
+            && !(base(first) == "rg" && words[1..].iter().any(|w| w.starts_with("--hostname-bin") || w.starts_with("--search-zip") || (w.starts_with('-') && !w.starts_with("--") && w.contains('z'))))
+            && (list.contains(&base(first).as_str())
+                || (!ps && base(first) == "git" && words.get(1).is_some_and(|s| READ_ONLY_GIT.contains(s)) && !words.iter().any(|w| w.starts_with("--output"))))
+            && !(ps && words.iter().any(|w| w.starts_with('$') && words.get(1) == Some(&"=")))
+    })
+}
+
+/// The command text with quoting undone the way the shell would before it uses a word: string joins (`"a" + "b"`, `'a''b'`) closed,
+/// `$` before a quote dropped (`$'o'` → `o`), quote characters and escapes (backslash in Bash, backtick in PowerShell) removed.
+/// Used only to look for `.olp`; never to name a target.
+fn flattened(cmd: &str, ps: bool) -> String {
+    let c: Vec<char> = cmd.chars().collect();
+    let mut out = String::new();
+    let mut i = 0;
+    while i < c.len() {
+        let ch = c[i];
+        if "'\"".contains(ch) {
+            // a closing quote, blanks, `+`, blanks, an opening quote = one joined string
+            let mut j = i + 1;
+            while j < c.len() && c[j].is_whitespace() {
+                j += 1;
+            }
+            if j < c.len() && c[j] == '+' {
+                let mut k = j + 1;
+                while k < c.len() && c[k].is_whitespace() {
+                    k += 1;
+                }
+                if k < c.len() && "'\"".contains(c[k]) {
+                    i = k + 1;
+                    continue;
+                }
+            }
+            i += 1;
+            continue;
+        }
+        if !ps && ch == '$' && c.get(i + 1) == Some(&'\'') {
+            // ANSI-C quoting: decode `\xHH`, `\uHHHH`, `\UHHHHHHHH` and `\NNN` the way bash does (second review RECHECK 11:
+            // `$'\x6f'` = `o`); other escapes keep their letter
+            let mut j = i + 2;
+            while j < c.len() && c[j] != '\'' {
+                if c[j] == '\\' && j + 1 < c.len() {
+                    let (radix, max, start) = match c[j + 1] {
+                        'x' => (16, 2, j + 2),
+                        'u' => (16, 4, j + 2),
+                        'U' => (16, 8, j + 2),
+                        '0'..='7' => (8, 3, j + 1),
+                        _ => (0, 0, j + 1),
+                    };
+                    if radix == 0 {
+                        out.push(c[j + 1]);
+                        j += 2;
+                        continue;
+                    }
+                    let digits: String = c[start..].iter().take(max).take_while(|d| d.is_digit(radix)).collect();
+                    match u32::from_str_radix(&digits, radix).ok().and_then(char::from_u32) {
+                        Some(d) if !digits.is_empty() => out.push(d),
+                        _ => out.push(c[j + 1]),
+                    }
+                    j = start + digits.len();
+                    continue;
+                }
+                out.push(c[j]);
+                j += 1;
+            }
+            i = j + 1;
+            continue;
+        }
+        if ch == '$' && c.get(i + 1).is_some_and(|n| "'\"".contains(*n)) {
+            i += 1;
+            continue;
+        }
+        if (!ps && ch == '\\') || (ps && ch == '`') {
+            i += 1;
+            continue;
+        }
+        out.push(ch);
+        i += 1;
+    }
+    out
+}
+
+fn assess_shell_parsed(cmd: &str, map: &DeviceMap, cwd: &Path, limits: Limits, ps: bool) -> Assessment {
     let parsed = if ps { shell::parse_ps(cmd) } else { shell::parse(cmd) };
     if parsed.complex {
-        return builds_itself(cmd);
+        return builds_itself(cmd, cwd, ps);
     }
     if parsed.substs.is_empty() {
         return assess_parsed(cmd, &parsed, map, cwd, limits, ps);
@@ -959,22 +2410,38 @@ fn assess_shell(cmd: &str, map: &DeviceMap, cwd: &Path, limits: Limits, ps: bool
     let ok = outer.is_read()
         && subst_places_ok(&parsed)
         && !touches_self(&shell::deep_words([cmd]))
-        && parsed.substs.iter().all(|s| assess_shell(s, map, cwd, limits, ps).is_read());
+        && !self_guard(&raw_words(cmd, ps).into_iter().chain(blind_words(cmd)).collect::<Vec<_>>(), built_base(cmd, cwd, ps), cmd)
+        // Ledger 1321 ①: the whole command is a bundle, so its inner commands are judged without remembered answers.
+        && parsed.substs.iter().all(|s| assess_shell(s, &DeviceMap::default(), cwd, limits, ps).is_read());
     if ok {
         outer
     } else {
-        builds_itself(cmd)
+        // the outer verdict's self-protection is kept (second review RECHECK 3 of rel 61983f0d3: never dropped on this path)
+        let mut b = builds_itself(cmd, cwd, ps);
+        b.self_guard |= outer.self_guard;
+        // and so is each inner command's, read by the real parser (second review RECHECK 4 of rel 622fe5781, ⓓ)
+        b.self_guard |= parsed.substs.iter().any(|s| assess_shell(s, &DeviceMap::default(), cwd, limits, ps).self_guard);
+        b
     }
 }
 
+/// The folder relative targets of a built command are judged against: the working folder, unless a word moves the folder.
+fn built_base<'a>(text: &str, cwd: &'a Path, ps: bool) -> Option<&'a Path> {
+    (!raw_words(text, ps).iter().any(|w| moves_folder(w))).then_some(cwd)
+}
+
 /// Command substitution, heredoc, etc.: scan the whole text deeply for danger kinds only; otherwise block as not answerable by a group answer.
-fn builds_itself(cmd: &str) -> Assessment {
+fn builds_itself(cmd: &str, cwd: &Path, ps: bool) -> Assessment {
     let mut a = Assessment::default();
     let deep = shell::deep_words([cmd]);
     for k in detect_dangers(&deep) {
         a.findings.push(Finding { kind: k, count: Count::unknown(k.unit(), "the command builds parts of itself at run time") });
     }
-    a.self_guard |= touches_self(&deep);
+    // one check for every path: the real words and the working folder (second review RECHECK 3 of rel 61983f0d3). The whole text is
+    // judged, heredoc bodies too: a second heredoc reader read `<<` differently from bash and hid later commands (RECHECK 4, B RECHECK 6).
+    let base = built_base(cmd, cwd, ps);
+    let words: Vec<String> = raw_words(cmd, ps).into_iter().chain(blind_words(cmd)).filter(|w| !glob_above_olp_only(w, base)).collect();
+    a.self_guard |= touches_self(&deep) || self_guard(&words, base, cmd) || mentions_olp_component(cmd);
     a.unanswerable = true;
     a
 }
@@ -993,13 +2460,219 @@ fn subst_places_ok(p: &shell::Parsed) -> bool {
     })
 }
 
+/// Shell words that open a block (loops, branches, functions, PowerShell try).
+const BUNDLE_WORDS: &[&str] = &[
+    "if", "then", "elif", "else", "fi", "for", "while", "until", "do", "done", "case", "esac", "select", "function", "elseif", "try", "catch", "finally",
+    "foreach", "switch", "trap", "filter",
+];
+
+/// Ledger 1321 ① as an allow list (coordinator, design 1-15 «allowed characters only»): a remembered answer may be used only when every
+/// character of the raw command is one of `A-Z a-z 0-9`, a space, or `. _ - / \ = : +`, and no word is a block word (`%` `@` `,` are out —
+/// cmd.exe expands `%X%` when a .cmd/.bat runs, PowerShell `@env:X`/`@a` expand a variable and splits `git ,push` into `git push`, and `&`
+/// inside an expanded value splits the line). Anything else —
+/// quotes of any kind, `;` `|` `&` `$` backticks, redirections, tabs, control or full-width characters, non-ASCII — makes the command a
+/// bundle: it never uses or offers a remembered answer and asks every time. Nothing is parsed, so no shell's quoting can open a hole.
+/// `_ps` is kept so both shells share one call shape.
+pub fn bundled(cmd: &str, _ps: bool) -> bool {
+    let allowed = |ch: char| ch.is_ascii_alphanumeric() || " ._-/\\=:+".contains(ch);
+    !cmd.chars().all(allowed) || cmd.split(' ').any(|w| BUNDLE_WORDS.contains(&w.to_ascii_lowercase().as_str()))
+}
+
+/// Coordinator decision after second review RECHECK c501bf669 (third hole-by-hole round, principle 7: a device, not more sentences):
+/// a remembered answer and the built-in read pass are used only for a simple form — the whole command is one program name and its
+/// arguments. Anything else asks every time:
+/// - shell grammar: `;` `|` `&` `(` `)` `{` `}` backtick or a line break anywhere in the raw text, or a leading grammar word
+///   (`!` `if` `while` `for` `case` `[[` …);
+/// - a wrapper that runs another program (env, exec, sudo, command, builtin, nice, time, nohup, xargs, timeout, …);
+/// - a builtin that changes variables or the shell (printf -v, read, declare, typeset, export, local, set, source, `.`, …);
+/// - an assignment anywhere (`NAME=value`; PowerShell `$x = …`, `$env:X=…`).
+/// Nothing depends on where the real command starts, so the place a check looks at cannot differ from the place the shell starts
+/// the program (the root of RECHECK c501bf669 blocking 1-3).
+const NOT_SIMPLE_BASH: &[&str] = &[
+    // grammar words
+    "!", "[[", "if", "then", "elif", "else", "fi", "for", "while", "until", "do", "done", "case", "esac", "select", "function", "coproc",
+    // wrappers
+    "env", "exec", "sudo", "doas", "su", "runuser", "command", "builtin", "nice", "time", "nohup", "xargs", "timeout", "stdbuf", "ionice",
+    "chrt", "taskset", "setsid", "unbuffer", "watch", "strace", "ltrace", "eval", "chroot", "nsenter", "unshare", "flock",
+    // builtins that change variables or the shell
+    "read", "readarray", "mapfile", "declare", "typeset", "export", "local", "readonly", "set", "unset", "source", ".", "alias", "unalias",
+    "shopt", "enable", "hash", "let", "getopts", "trap",
+    // never a built-in read (rc4 rev 17): test, [ and [[ evaluate array subscripts as arithmetic; echo prints arithmetic too
+    "test", "[", "echo",
+];
+const NOT_SIMPLE_PS: &[&str] = &[
+    "&", ".", "start-process", "saps", "start", "invoke-expression", "iex", "invoke-command", "icm", "set-variable", "sv", "new-variable", "nv",
+    "clear-variable", "clv", "remove-variable", "rv", "set-item", "si", "if", "elseif", "else", "for", "foreach", "while", "do", "switch",
+    "try", "catch", "finally", "trap", "filter", "function",
+    "echo",
+];
+
+fn ps_assignment(w: &str) -> bool {
+    matches!(w, "=" | "+=" | "-=" | "*=" | "/=" | "??=") || (w.starts_with('$') && w.contains('='))
+}
+
+/// One piece (no separator inside) is a program name and its arguments only.
+fn simple_piece(words: &[String], ps: bool) -> bool {
+    let Some(first) = words.first() else { return true };
+    let b = base(first);
+    if ps {
+        !NOT_SIMPLE_PS.contains(&b.as_str()) && !words.iter().any(|w| ps_assignment(w))
+    } else {
+        !NOT_SIMPLE_BASH.contains(&b.as_str()) && !(b == "printf" && words.iter().skip(1).any(|w| w.starts_with("-v"))) && !words.iter().any(|w| is_assignment(w))
+    }
+}
+
+/// Simple form (see NOT_SIMPLE_BASH).
+/// `whole` (a remembered answer): one piece, no separator character, no `$( )`; its characters are judged by `bundled`'s own allow
+/// list.
+/// Otherwise (the built-in read pass, rc4 rev 17-2 — decide what is allowed, not what is blocked): `read_text_pieces` must accept the
+/// raw text, it must split into exactly as many pieces as the parser found, every piece is simple, and a piece with an unquoted glob
+/// runs a command from GLOB_READS.
+fn simple_form(cmd: &str, parsed: &shell::Parsed, ps: bool, whole: bool) -> bool {
+    let words = |s: &shell::Segment| s.words.iter().map(|w| w.text.clone()).collect::<Vec<_>>();
+    if whole {
+        return !cmd.chars().any(|c| ";|&\n\r".contains(c)) && parsed.segments.len() <= 1 && parsed.substs.is_empty() && parsed.segments.iter().all(|s| simple_piece(&words(s), ps));
+    }
+    let Some(globs) = read_text_pieces(cmd, ps) else { return false };
+    parsed.substs.is_empty()
+        && globs.len() == parsed.segments.len()
+        && parsed.segments.iter().zip(&globs).all(|(s, &glob)| {
+            let w = words(s);
+            simple_piece(&w, ps) && (!glob || w.first().is_some_and(|f| GLOB_READS.contains(&base(f).as_str())))
+        })
+}
+
+/// Commands that have no option which writes, deletes or runs anything, so a glob that expands to a name like `--output=x` or
+/// `-delete` still only reads (rev 17-2 ④). Not here: sort (-o), sed (-i), git (diff --output), rg (--pre), find (-delete, -exec),
+/// file (-C), tee, and test, [ and echo.
+const GLOB_READS: &[&str] = &["ls", "cat", "head", "tail", "wc", "grep", "du", "get-childitem", "gci", "dir", "get-content", "gc", "select-string", "sls"];
+
+/// Output discarded, never written to a file (rev 17-2 ③): exactly these words, nothing else with `>` or `<`.
+const NULL_REDIRECTS: [&str; 4] = ["2>/dev/null", ">/dev/null", "2>&1", "&>/dev/null"];
+
+/// The allow list of the built-in read pass, read character by character (rc4 rev 17-2). Outside quotes: letters, digits, Hangul,
+/// spaces and `- _ . / = : , @ + %`, the separators `;` `|` `&` between non-empty pieces, an unquoted `*` or `?` (glob, see
+/// GLOB_READS) and the four NULL_REDIRECTS words. `'…'`: anything (Bash keeps it literally; PowerShell also ends a string at a
+/// typographic quote, so those are refused inside). `"…"`: anything except `$`, backtick, backslash, `!` and typographic quotes. Every other
+/// character — `$`, backslash, brackets of any kind, `~ ! # ^ < >`, backticks, tabs, line breaks, other spaces — refuses.
+/// Returns, per piece, whether it has an unquoted glob; None = ask.
+fn read_text_pieces(cmd: &str, ps: bool) -> Option<Vec<bool>> {
+    let c: Vec<char> = cmd.chars().collect();
+    let plain = |ch: char| ch.is_ascii_alphanumeric() || "-_./=:,@+%".contains(ch) || is_hangul(ch);
+    let typographic = |ch: &char| matches!(*ch, '\u{2018}' | '\u{2019}' | '\u{201a}' | '\u{201b}' | '\u{201c}' | '\u{201d}' | '\u{201e}');
+    let mut globs = vec![false];
+    let mut filled = false;
+    let mut word_start = true;
+    let mut i = 0;
+    while i < c.len() {
+        if word_start {
+            let hit = NULL_REDIRECTS.iter().find(|r| {
+                let rc: Vec<char> = r.chars().collect();
+                c[i..].starts_with(&rc) && c.get(i + rc.len()).is_none_or(|n| *n == ' ' || *n == ';' || *n == '|')
+            });
+            if let Some(r) = hit {
+                i += r.chars().count();
+                word_start = false;
+                filled = true;
+                continue;
+            }
+        }
+        let ch = c[i];
+        match ch {
+            ' ' => {
+                word_start = true;
+                i += 1;
+            }
+            ';' | '|' | '&' => {
+                if !filled {
+                    return None;
+                }
+                let run: String = c[i..].iter().take_while(|x| ";|&".contains(**x)).collect();
+                if !matches!(run.as_str(), ";" | "|" | "&" | "&&" | "||") {
+                    return None;
+                }
+                i += run.chars().count();
+                globs.push(false);
+                filled = false;
+                word_start = true;
+            }
+            '\'' => {
+                let len = c[i + 1..].iter().position(|&x| x == '\'')?;
+                if ps && c[i + 1..i + 1 + len].iter().any(typographic) {
+                    return None;
+                }
+                i += len + 2;
+                word_start = false;
+                filled = true;
+            }
+            '"' => {
+                let len = c[i + 1..].iter().position(|&x| x == '"')?;
+                if c[i + 1..i + 1 + len].iter().any(|x| "$`\\!".contains(*x) || typographic(x)) {
+                    return None;
+                }
+                i += len + 2;
+                word_start = false;
+                filled = true;
+            }
+            '*' | '?' => {
+                *globs.last_mut()? = true;
+                i += 1;
+                word_start = false;
+                filled = true;
+            }
+            _ if plain(ch) => {
+                i += 1;
+                word_start = false;
+                filled = true;
+            }
+            _ => return None,
+        }
+    }
+    filled.then_some(globs)
+}
+
+fn is_hangul(c: char) -> bool {
+    matches!(c, '\u{AC00}'..='\u{D7A3}' | '\u{1100}'..='\u{11FF}' | '\u{3130}'..='\u{318F}')
+}
+
+/// `NAME=value` with a shell variable name (letters, digits, `_`, not starting with a digit).
+fn is_assignment(w: &str) -> bool {
+    w.split_once('=')
+        .map(|(k, _)| !k.is_empty() && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') && !k.starts_with(|c: char| c.is_ascii_digit()))
+        .unwrap_or(false)
+}
+
 fn assess_parsed(cmd: &str, parsed: &shell::Parsed, map: &DeviceMap, cwd: &Path, limits: Limits, ps: bool) -> Assessment {
     let follow_cd = !ps;
+    let is_bundle = bundled(cmd, ps);
+    // Simple form only (coordinator decision after RECHECK c501bf669, path B; replaces the front-assignment rule of RECHECK 21880f55a):
+    // a remembered answer needs the whole command to be one program name with its arguments; the built-in read pass needs every piece
+    // to be one (A would add about 998 asks a day on this PC, B about 216 = 3.7 % of about 5,900 calls).
+    let simple = simple_form(cmd, parsed, ps, true);
+    let simple_pieces = simple_form(cmd, parsed, ps, false);
     let mut exec_names: Vec<String> = Vec::new();
+    // A remembered read answer (already limited to a whole simple command by `bundled`) is not a built-in read, so the read-pass
+    // allow list at the end does not apply to it (rev 17-2: a saved answer with a Windows path keeps working).
+    let mut remembered = false;
     let ctx = Ctx::new(limits);
     let mut a = Assessment::default();
     let mut dir = Dir::Known { path: cwd.to_path_buf(), moved: false };
+    let mut moved_dir = false;
     let segs = &parsed.segments;
+    // Design 1-12 §2-4d ⑤: whether each piece is a proven read (closed table first word, read by the built-in rules, and
+    // joined to the next piece by `;`/newline, `&&` or `||`). A later interpreter or runner key needs every earlier piece proven.
+    let proven: Vec<bool> = segs
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            let w: Vec<String> = s.words.iter().map(|x| x.text.clone()).collect();
+            let safe: Vec<bool> = s.words.iter().map(|x| x.literal && !x.brace).collect();
+            let joined_ok = segs.get(i + 1).is_none_or(|n| matches!(n.joined_by, Join::Seq | Join::AndAnd | Join::OrOr));
+            let table = if ps { PROVEN_READ_PS } else { PROVEN_READ_BASH };
+            let first_ok = w.first().is_some_and(|f| !pathed(f) && table.contains(&f.to_lowercase().as_str()));
+            joined_ok && first_ok && is_read_segment(&w, &safe, ps)
+        })
+        .collect();
     for (i, seg) in segs.iter().enumerate() {
         // After a directory change, a separator other than `&&` (;, ||, |, newline, &) runs even if the earlier part failed, so the directory is unknown
         if matches!(dir, Dir::Known { moved: true, .. }) && seg.joined_by != Join::AndAnd {
@@ -1011,7 +2684,11 @@ fn assess_parsed(cmd: &str, parsed: &shell::Parsed, map: &DeviceMap, cwd: &Path,
             match r {
                 Some(t) if is_null_sink(t) => {}
                 Some(t) => {
-                    a.self_guard |= t.contains(".olp") || in_olp;
+                    let base_dir = match &dir {
+                        Dir::Known { path, .. } => Some(path.as_path()),
+                        Dir::Unknown(_) => None,
+                    };
+                    a.self_guard |= target_is_olp_state(t, base_dir, cmd) || in_olp;
                     let c = match (&dir, ctx.deadline()) {
                         (Dir::Unknown(why), _) => Count::unknown(Unit::File, why),
                         (Dir::Known { path, .. }, Some(d)) => count_or_unknown(Unit::File, counter::count_paths(path, &[t.as_str()], d)),
@@ -1019,7 +2696,17 @@ fn assess_parsed(cmd: &str, parsed: &shell::Parsed, map: &DeviceMap, cwd: &Path,
                     };
                     a.findings.push(Finding { kind: Kind::FileOverwrite, count: c });
                 }
-                None => a.findings.push(Finding { kind: Kind::FileOverwrite, count: Count::unknown(Unit::File, "the target uses patterns or variables") }),
+                None => {
+                    // a target written with a variable (`> $HOME/olp/...`) is not resolved, so the whole text decides self-protection
+                    // the parser gives no name for a glob or variable target: take the words after `>` from the raw text and judge them
+                    // on the same path as `tee`/`cp` (second review RECHECK 1 of rel dd79e582c, blocking 2)
+                    let base_dir = match &dir {
+                        Dir::Known { path, .. } => Some(path.as_path()),
+                        Dir::Unknown(_) => None,
+                    };
+                    a.self_guard |= target_is_olp_state("", None, cmd) || self_guard(&[], base_dir, cmd) || in_olp;
+                    a.findings.push(Finding { kind: Kind::FileOverwrite, count: Count::unknown(Unit::File, "the target uses patterns or variables") })
+                }
             }
         }
         let stripped = strip_prefix_words(&words);
@@ -1032,17 +2719,46 @@ fn assess_parsed(cmd: &str, parsed: &shell::Parsed, map: &DeviceMap, cwd: &Path,
         }
         let b0 = base(&stripped[0]);
         let changes_dir = CD_VERBS.contains(&b0.as_str()) || (b0 == "builtin" && stripped.get(1).is_some_and(|w| CD_VERBS.contains(&base(w).as_str())));
+        // Design 1-8 §2-1c rule 4 (closed): any of the 8 folder-move words earlier in the command, whatever joins the pieces
+        // (also `(cd x; ...)`), means a later interpreter key takes no group answer.
+        // Review RECHECK 1 blocking 1: the folder-move word is looked up where the command really starts, after leading syntax
+        // words (`{`, `if`, `then`, `while`, `do`, `!` via bash_cmd_start) and, for PowerShell, in every piece split by ps_parts.
+        // PowerShell also has the built-in functions `cd..` and `cd\` (second review blocking 1).
+        let is_cd = |w: &String| {
+            let l = w.to_lowercase();
+            CD_VERBS.contains(&base(w).as_str()) || l.starts_with("cd..") || l.starts_with("cd\\") || l.starts_with("cd~")
+        };
+        let lead_cd = if ps {
+            ps_parts(&words).iter().any(|(_, p)| p.first().is_some_and(is_cd))
+        } else {
+            bash_cmd_start(&words).and_then(|o| words.get(o)).is_some_and(is_cd)
+        };
+        if changes_dir || lead_cd || CD_VERBS.contains(&b0.trim_start_matches(['(', '{'])) {
+            moved_dir = true;
+        }
         if changes_dir {
             dir = if ps { ps_after_cd(&dir, seg) } else { after_cd(&dir, seg, segs.get(i + 1).map(|s| s.joined_by), follow_cd) };
         }
         // PowerShell pieces are split at control words and braces and each command is inspected separately ("if" is not a command name; the command after `... } else { mytool ...` is inspected too)
         let start = words.len() - stripped.len();
+        // A wrapper folder flag (`env -Cx`, `env --chdir=x`, `sudo -D x`) runs the program in another folder (design 1-8).
+        // Wrapper words are those before the real command start (after leading syntax words too: `! env -Cx node a.js`).
+        let cmd_at = if ps { start } else { bash_cmd_start(&words).unwrap_or(start).max(start) };
+        let wrapper_moved = words[..cmd_at].iter().any(|w| w == "--chdir" || w.starts_with("--chdir=") || w.starts_with("-C") || w.starts_with("-D"));
+        // Design 1-11 §2-4d: every word before the program must be understood (leading syntax words aside).
+        let lead = if ps { 0 } else { words.iter().take_while(|x| BASH_LEAD.contains(&x.as_str())).count().min(cmd_at) };
+        let prefix_understood = understood_prefix(&words[lead..cmd_at]);
         let parts: Vec<(usize, &[String])> = if ps { ps_parts(stripped).into_iter().map(|(o, p)| (start + o, p)).collect() } else { bash_cmd_start(stripped).map(|o| (start + o, &stripped[o..])).into_iter().collect() };
         let safe: Vec<bool> = seg.words.iter().map(|w| w.literal && !w.brace).collect();
+        let first_part_at = parts.first().map(|(at, _)| *at);
         let unread: Vec<(usize, &[String])> = parts.into_iter().filter(|(at, p)| !is_read_segment(p, safe.get(*at..*at + p.len()).unwrap_or(&[]), ps) && !(ps && ps_string_output(seg, *at, p))).collect();
         let Some(&(first_at, first)) = unread.first() else { continue };
         let deep = shell::deep_words(words.iter().map(|s| s.as_str()));
-        a.self_guard |= touches_self(&deep) || in_olp;
+        let base_dir = match &dir {
+            Dir::Known { path, .. } => Some(path.as_path()),
+            Dir::Unknown(_) => None,
+        };
+        a.self_guard |= self_guard(&words, base_dir, cmd) || touches_self(&deep) || in_olp;
         let fam = family_of(first).unwrap_or_default();
         let key = format!("bash:{fam}");
         let entry = map.entries.get(&key);
@@ -1061,12 +2777,50 @@ fn assess_parsed(cmd: &str, parsed: &shell::Parsed, map: &DeviceMap, cwd: &Path,
         // + first word not literal (`$s.Sum/1MB` -> base `1mb`) or a PowerShell digit-leading word (numeric expression) = not a name (prevents regression on known cases)
         // PowerShell inspects each non-read command separately (earlier commands are handled like fam and entry above)
         let fams: Vec<(String, usize)> = if ps { unread.iter().map(|(at, p)| (family_of(p).unwrap_or_default(), *at)).collect() } else { vec![(fam, first_at)] };
+        // Second review RECHECK 9a54918df blocking 2: a PowerShell piece split by ps_parts (try/finally, if, braces) is a group
+        // the parser did not fully follow. A part that is not the piece's first part, or whose own leading words are not
+        // understood, takes no group answer for an interpreter or runner key.
+        let ps_unproven_parts: Vec<usize> = if ps {
+            unread
+                .iter()
+                .filter(|(at, p)| {
+                    let s = strip_prefix_words(p);
+                    Some(*at) != first_part_at || !understood_prefix(&p[..p.len() - s.len()])
+                })
+                .map(|(at, _)| *at)
+                .collect()
+        } else {
+            Vec::new()
+        };
         for (fam, at) in fams {
             let first_literal = seg_literal(seg, at);
             let ps_number = ps && ps_number_literal(fam.split(' ').next().unwrap_or(""));
             // A path-qualified first word (`./mytool`, `bin/mytool`) runs that file, so it never takes the bare name's answer (review memo M1).
             let pathed_name = seg.words.get(at).is_some_and(|w| pathed(&w.text));
-            if !family_is_name(&fam) || !first_literal || ps_number || pathed_name {
+            // An interpreter key after a folder move in the same command names another file (design 1-5 §2-1c rule 4),
+            // and its script path is written from the project root (design 1-6, list row i16).
+            // A runner key (`bun x cowsay`) names a package, not a file: no folder rule and no root path (review RECHECK 1 blocking 2).
+            let script_key = interpreter_family(&fam) && !runner_family(&fam);
+            let moved_script = (moved_dir || wrapper_moved) && script_key;
+            // Second review blocking 2: stripping stopped on a wrapper flag's value (`env -C x node a.js` -> `x node`); when an
+            // interpreter or runner follows, the real program is behind the value, so the piece takes no group answer.
+            let flag_value = !ps
+                && at > 0
+                && words.get(at - 1).is_some_and(|w| w.starts_with('-'))
+                && words.iter().skip(at + 1).any(|w| interpreter_name(&base(w)).is_some() || runner_program(&base(w)).is_some());
+            let earlier_unproven = proven[..i].iter().any(|p| !p) || ps_unproven_parts.contains(&at);
+            let moved_script = moved_script || flag_value || ((!prefix_understood || earlier_unproven) && closed_grammar_family(&fam));
+            // Second review RECHECK 3f5b6b3ef blocking 1: a one-word key taken from a command whose next word is a flag
+            // (`git -c x=y status`, `git -C x push`) drops the subcommand, so one answer would cover every form: a read answer never
+            // passes it and the card never offers it. A stored non-read answer (`psql` writes_other with a declared row count) still
+            // applies, since it never lets a call through without asking.
+            // RECHECK 21880f55a blocking 1: any second word that did not become part of the key (`,push`, `-C`, `x.txt`) drops the
+            // subcommand, so the one-word answer does not cover it.
+            let flagged_one_word = !fam.contains(' ')
+                && seg.words.get(at + 1).is_some()
+                && map.entries.get(&format!("bash:{fam}")).is_none_or(|e| e.effect == Effect::ReadOnly);
+            let fam = if script_key && fam.contains(' ') { rooted_interpreter_key(&fam, cwd) } else { fam };
+            if !family_is_name(&fam) || !first_literal || ps_number || pathed_name || moved_script || flagged_one_word || is_bundle || !simple {
                 a.unnamed = true;
                 // PowerShell info line (when the parser is unavailable): block/exec verbs are shown because the name is human-readable; meaningless pieces (`"1mb"`, `$x`) give 0
                 if let Some(w) = seg.words.get(at).filter(|w| EXEC_VERBS.contains(&base(&w.text).as_str())) {
@@ -1077,7 +2831,7 @@ fn assess_parsed(cmd: &str, parsed: &shell::Parsed, map: &DeviceMap, cwd: &Path,
                 continue;
             }
             match map.entries.get(&format!("bash:{fam}")) {
-                Some(e) if e.effect == Effect::ReadOnly => {}
+                Some(e) if e.effect == Effect::ReadOnly => remembered = true,
                 Some(e) => a.classified.push(e.clone()),
                 None => {
                     if !a.to_classify.contains(&fam) {
@@ -1093,7 +2847,7 @@ fn assess_parsed(cmd: &str, parsed: &shell::Parsed, map: &DeviceMap, cwd: &Path,
         match crate::ps_ast::parse(cmd) {
             Some(facts) => {
                 let (kinds, unknown) = judge_ps_facts(&facts);
-                if kinds.is_empty() && unknown.is_empty() {
+                if kinds.is_empty() && unknown.is_empty() && simple_pieces {
                     return Assessment::default();
                 }
                 for (k, why) in kinds {
@@ -1110,6 +2864,12 @@ fn assess_parsed(cmd: &str, parsed: &shell::Parsed, map: &DeviceMap, cwd: &Path,
             }
             None => a.not_recognized = exec_names,
         }
+    }
+    // Only a call that would otherwise pass is turned into an ask; a card that already asks keeps its own text.
+    // rev 17-3: no file inside the project (not even an exact "always allow" rule in .claude/settings*.json) can turn this ask into a
+    // pass; a cloned repository could plant one.
+    if !simple_pieces && a.is_read() && !remembered {
+        a.unnamed = true;
     }
     a
 }
@@ -1296,7 +3056,7 @@ pub fn assess(tool: &str, input: &Value, map: &DeviceMap, cwd: &Path, limits: Li
     }
     if BUILTIN_OVERWRITE_TOOLS.contains(&tool) {
         let target = input.get("file_path").or_else(|| input.get("notebook_path")).and_then(|v| v.as_str());
-        let mut a = Assessment { self_guard: target.map(|t| t.contains(".olp")).unwrap_or(false), ..Default::default() };
+        let mut a = Assessment { self_guard: target.map(|t| target_is_olp_state(t, Some(cwd), t)).unwrap_or(false), ..Default::default() };
         let c = match (target, limits.counter) {
             (Some(t), Some(d)) => count_or_unknown(Unit::File, counter::count_paths(cwd, &[t], Instant::now() + d)),
             (None, _) => Count::unknown(Unit::File, "no target file given"),
@@ -1337,7 +3097,8 @@ mod tests {
     fn families() {
         let f = |s: &str| family_of(&s.split(' ').map(String::from).collect::<Vec<_>>()).unwrap();
         assert_eq!(f("cargo test --release"), "cargo test");
-        assert_eq!(f("python script.py"), "python");
+        assert_eq!(f("python script.py"), "python script.py");
+        assert_eq!(f("python -m pytest"), "python");
         assert_eq!(f("FOO=1 sudo -E npm run build"), "npm run");
         assert_eq!(f("ls -la"), "ls");
     }
@@ -1401,8 +3162,9 @@ mod tests {
         // The verdict is unchanged: even without a candidate it is a write (no read pass, effect unknown). With the parser available, a parsed read passes;
         // cases that depend on the parser moved to tests/ps_parser_paths.rs (shared helper require_ps_parser_or_env_fallback)
         // (`(foo)` and `& x` are split by the parser at the parenthesis and `&` into `foo` and `x`, real command names, so they correctly remain candidates and were removed from the list)
-        // A piece of only braces (`}`) has no command to run = read (a block `if (x) { (...) }` produces `{` and `}` pieces), so it is removed from the list
-        assert!(run("PowerShell", "}").is_read(), "중괄호만 = 돌 명령 0");
+        // A piece of only braces (`}`) has no command to run, but a brace anywhere means the split cannot be trusted, so it is not a
+        // simple form and asks (rc4 rev 15, «simple form only»); it still gives 0 candidates (removed from the junk list below)
+        assert!(!run("PowerShell", "}").is_read(), "a lone brace is not a simple form, so it asks (rc4 rev 15)");
         // A standalone string `"1mb"` is output only = read (removed from this list). `"..." -f x` with more words is unchanged.
         assert!(run("PowerShell", r#""1mb""#).is_read(), "홀로 선 문자열 = 출력");
         // With the parser available, variable output, blocks with only numbers and comparisons are parsed reads, so those two shapes (`ForEach-Object { 1 }`, `where-object x`) live in tests/ps_parser_paths.rs
@@ -1416,7 +3178,11 @@ mod tests {
         }
         // Real tools starting with a digit (Bash) remain candidates (no regression)
         assert_eq!(run("Bash", "7z a x.zip").to_classify, ["7z a"]);
-        assert_eq!(run("Bash", "2to3 -w x.py").to_classify, ["2to3"]);
+        assert_eq!(run("Bash", "2to3").to_classify, ["2to3"]);
+        // A second word that is not part of the key (a flag, a file name, `,push`) leaves a one-word key without its subcommand, so it takes
+        // no group answer (rc4 second review RECHECK 3f5b6b3ef blocking 1 · RECHECK 21880f55a blocking 1)
+        assert!(run("Bash", "2to3 -w x.py").to_classify.is_empty());
+        assert!(run("Bash", "2to3 x.py").to_classify.is_empty());
         // PowerShell digit-leading words are numeric expressions; a non-literal first word (`$s.Sum/1MB` -> base `1mb`) gives 0 candidates
         assert!(run("PowerShell", r#""1mb""#).to_classify.is_empty());
         // In PowerShell too, digit-leading tools stay candidates (no regression on the main Windows surface); only numeric literal shapes give 0

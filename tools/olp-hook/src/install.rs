@@ -335,22 +335,37 @@ pub fn add_entries(original: Option<&str>, command: &str, replace: bool) -> Resu
 }
 
 /// Removes only our hooks (PreToolUse, PostToolUse and the usage-count SessionStart entries). An item containing only our hooks is removed whole; empty lists and empty hooks objects are kept.
+/// (`uninstall` uses `remove_entries_pruned`, which also deletes the empty containers install made.)
 pub fn remove_entries(original: &str) -> Result<Change, String> {
-    remove_where(original, &[("PreToolUse", is_our_command), ("PostToolUse", is_our_command), (START_EVENT, is_our_start_command)])
+    remove_where(original, &[("PreToolUse", is_our_command), ("PostToolUse", is_our_command), (START_EVENT, is_our_start_command)], None)
 }
 
 /// Removes only the usage-count SessionStart entry (`telemetry off`); hook entries are untouched.
 pub fn remove_start_entry(original: &str) -> Result<Change, String> {
-    remove_where(original, &[(START_EVENT, is_our_start_command)])
+    remove_where(original, &[(START_EVENT, is_our_start_command)], None)
+}
+
+/// Which empty containers uninstall may delete after removing our entries (0.1.3 ⑤, DESIGN_OLP_013_INSTALL_GATE §5-1).
+/// Never a list or `hooks` object that someone else made: `Listed` = only the keys the install marker says install created;
+/// `EmptiedByUs` = no marker (0.1.1·0.1.2 installs) — only event lists that held our entries and are empty now, and `hooks` if that emptied it.
+pub enum Prune<'a> {
+    Listed(&'a [String]),
+    EmptiedByUs,
+}
+
+/// Same as `remove_entries`, then deletes the empty containers `prune` allows.
+pub fn remove_entries_pruned(original: &str, prune: &Prune) -> Result<Change, String> {
+    remove_where(original, &[("PreToolUse", is_our_command), ("PostToolUse", is_our_command), (START_EVENT, is_our_start_command)], Some(prune))
 }
 
 /// (event name, predicate telling whether a command is ours for that event)
 type EventMatch<'a> = (&'a str, fn(&str) -> bool);
 
-fn remove_where(original: &str, events: &[EventMatch]) -> Result<Change, String> {
+fn remove_where(original: &str, events: &[EventMatch], prune: Option<&Prune>) -> Result<Change, String> {
     let mut root = parse(original)?;
     let mut changed = false;
     let mut lines = Vec::new();
+    let mut emptied = Vec::new();
     for &(ev, ours) in events {
         let Some(list) = event_list(&mut root, ev, false)? else { continue };
         let before = matching_in(list, ours).len();
@@ -363,13 +378,163 @@ fn remove_where(original: &str, events: &[EventMatch]) -> Result<Change, String>
             hs.retain(|h| !h.get("command").and_then(OrderedJson::str).is_some_and(ours));
             !(had > 0 && hs.is_empty())
         });
+        if list.is_empty() {
+            emptied.push(ev.to_string());
+        }
         changed = true;
         lines.push(format!("{ev}: removed olp-hook ({before})"));
     }
-    if !changed {
+    if changed {
+        if let Some(p) = prune {
+            prune_empty(&mut root, p, &emptied);
+        }
+    } else {
         lines.push(if events.len() == 1 { format!("{}: nothing to remove", events[0].0) } else { "olp-hook is not in this settings file; nothing to remove".into() });
     }
     Ok(finish(Some(original), &root, changed, lines))
+}
+
+/// Deletes empty event lists (and then an empty `hooks` object) only where `prune` allows. `emptied` = lists this uninstall emptied.
+fn prune_empty(root: &mut OrderedJson, prune: &Prune, emptied: &[String]) {
+    let may = |k: &str| match prune {
+        Prune::Listed(created) => created.iter().any(|c| c == k),
+        Prune::EmptiedByUs => emptied.iter().any(|e| e == k),
+    };
+    let Some(OrderedJson::Obj(h)) = root.get_mut("hooks") else { return };
+    let before = h.len();
+    h.retain(|(k, v)| !(matches!(v, OrderedJson::Arr(a) if a.is_empty()) && may(k)));
+    let hooks_now_empty = h.is_empty();
+    let hooks_may = match prune {
+        Prune::Listed(created) => created.iter().any(|c| c == "hooks"),
+        Prune::EmptiedByUs => before > 0,
+    };
+    if hooks_now_empty && hooks_may {
+        if let OrderedJson::Obj(m) = root {
+            m.retain(|(k, _)| k != "hooks");
+        }
+    }
+}
+
+// ---- Install marker (0.1.3 ⑤): `<base>/.olp/install-created-settings.json` records what install itself created in that settings file ----
+
+const MARKER_FILE: &str = "install-created-settings.json";
+
+/// What install created in one settings file: the file itself, and which keys (`hooks`, event names) did not exist before.
+#[derive(Debug, PartialEq)]
+pub struct Marker {
+    pub created_file: bool,
+    pub created: Vec<String>,
+}
+
+fn marker_path(base: &Path) -> PathBuf {
+    base.join(".olp").join(MARKER_FILE)
+}
+
+/// One normalisation for writing and reading (Windows: separators and case do not matter).
+fn marker_key(settings: &Path) -> String {
+    let s = settings.to_string_lossy().replace('\\', "/");
+    if cfg!(windows) {
+        s.to_lowercase()
+    } else {
+        s
+    }
+}
+
+/// The marker for exactly this settings file, or None when there is none, it is broken, or it names another file (then nothing gets deleted).
+fn read_marker(base: &Path, settings: &Path) -> Option<Marker> {
+    let v: serde_json::Value = serde_json::from_str(&fs::read_to_string(marker_path(base)).ok()?).ok()?;
+    if v.get("v")?.as_u64()? != 1 || v.get("settings")?.as_str()? != marker_key(settings) {
+        return None;
+    }
+    let created_file = v.get("created_file")?.as_bool()?;
+    let created = v.get("created")?.as_array()?.iter().map(|x| x.as_str().map(String::from)).collect::<Option<Vec<_>>>()?;
+    Some(Marker { created_file, created })
+}
+
+fn write_marker(base: &Path, settings: &Path, m: &Marker) -> Result<(), String> {
+    let p = marker_path(base);
+    let dir = p.parent().ok_or("bad marker path")?;
+    fs::create_dir_all(dir).map_err(|_| format!("could not make {}", dir.display()))?;
+    let v = serde_json::json!({ "v": 1, "settings": marker_key(settings), "by": "olp-hook install", "created_file": m.created_file, "created": m.created });
+    fs::write(&p, format!("{v}\n")).map_err(|_| format!("could not write {}", p.display()))
+}
+
+/// Keys present in `after` but not in `before`: `hooks` and event names under it.
+fn created_keys(before: Option<&str>, after: &str) -> Vec<String> {
+    let old = before.and_then(|t| parse(t).ok());
+    let new = match parse(after) {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+    let old_hooks = old.as_ref().and_then(|o| o.get("hooks"));
+    let mut out = Vec::new();
+    if old_hooks.is_none() && new.get("hooks").is_some() {
+        out.push("hooks".to_string());
+    }
+    if let Some(OrderedJson::Obj(h)) = new.get("hooks") {
+        for (k, _) in h {
+            if old_hooks.and_then(|o| o.get(k)).is_none() {
+                out.push(k.clone());
+            }
+        }
+    }
+    out
+}
+
+/// After install (or `telemetry on`) changed a settings file: add what it created to the marker. A new marker only for install;
+/// an existing one keeps `created_file` and grows (never shrinks), so a second install does not forget the first.
+fn note_created(base: &Path, settings: &Path, before: Option<&str>, after: &str, may_start: bool) -> Option<String> {
+    let new_keys = created_keys(before, after);
+    // A marker left behind when our entries were removed by hand (or the file deleted) must not carry over:
+    // if the file had none of our entries before this install, start a new marker (B review condition 1, REVIEW_OLP013_MARKER).
+    // On the `telemetry on` path (may_start = false) a stale marker is dropped, so uninstall falls back to pruning only what it emptied
+    // and never deletes the file (B recommendation, REVIEW_OLP013_MARKER RECHECK 1).
+    let stale = !before.is_some_and(has_our_entries);
+    if stale && !may_start {
+        let mp = marker_path(base);
+        // Say so when the old marker cannot be removed: uninstall would still use it (second review / B RECHECK 2 note).
+        return match fs::remove_file(&mp) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Some(format!("could not remove the old install marker {}; remove it by hand before uninstall", mp.display())),
+            _ => None,
+        };
+    }
+    let (mut m, fresh) = match read_marker(base, settings) {
+        Some(m) if !stale => (m, false),
+        _ if may_start => (Marker { created_file: before.is_none(), created: Vec::new() }, true),
+        _ => return None,
+    };
+    let old_len = m.created.len();
+    for k in new_keys {
+        if !m.created.contains(&k) {
+            m.created.push(k);
+        }
+    }
+    if !fresh && m.created.len() == old_len {
+        return None;
+    }
+    write_marker(base, settings, &m).err().map(|e| format!("{e}; uninstall will keep the settings file"))
+}
+
+/// Settings file is a plain file (not a link) — the only kind uninstall may delete.
+fn plain_file(p: &Path) -> bool {
+    fs::symlink_metadata(p).map(|m| m.file_type().is_file()).unwrap_or(false)
+}
+
+/// Whether a settings text already holds any entry of ours (PreToolUse, PostToolUse or the usage-count SessionStart).
+fn has_our_entries(text: &str) -> bool {
+    let Ok(mut root) = parse(text) else { return false };
+    for (ev, ours) in [("PreToolUse", is_our_command as fn(&str) -> bool), ("PostToolUse", is_our_command), (START_EVENT, is_our_start_command)] {
+        if let Ok(Some(list)) = event_list(&mut root, ev, false) {
+            if !matching_in(list, ours).is_empty() {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn is_empty_object(text: &str) -> bool {
+    matches!(parse(text), Ok(OrderedJson::Obj(m)) if m.is_empty())
 }
 
 fn exe_name(base: &str) -> String {
@@ -476,17 +641,42 @@ pub fn run(cmd: &str, args: &[String], env: &InstallEnv) -> Result<String, Strin
     };
     let dir = env.home.join("olp");
     let mut out = Vec::new();
+    let marker = if cmd == "uninstall" { read_marker(base, &settings) } else { None };
     let change = if cmd == "uninstall" {
         match &original {
-            Some(o) => remove_entries(o)?,
+            Some(o) => match &marker {
+                Some(m) => remove_entries_pruned(o, &Prune::Listed(&m.created))?,
+                None => remove_entries_pruned(o, &Prune::EmptiedByUs)?,
+            },
             None => return Ok(format!("{} does not exist; nothing to remove", settings.display())),
         }
     } else {
         add_entries(original.as_deref(), &command_for(&dir.join(exe_name("olp-hook"))), replace)?
     };
+    // Delete the whole file only when all hold: our entries were removed now, the marker for exactly this file says install created it,
+    // nothing else is left in it, and it is a plain file (not a link). Otherwise rewrite it as before (DESIGN_OLP_013_INSTALL_GATE §5-1 ③).
+    let delete_file = cmd == "uninstall" && change.changed && marker.as_ref().is_some_and(|m| m.created_file) && is_empty_object(&change.text) && plain_file(&settings);
     if dry {
         out.push(format!("dry run — nothing was changed. {}:", settings.display()));
         out.extend(change.lines);
+        if delete_file {
+            out.push(format!("would remove {} (install created it and nothing else is in it)", settings.display()));
+        }
+        return Ok(out.join("\n"));
+    }
+    if delete_file {
+        let o = original.as_deref().unwrap_or_default();
+        let b = backup(env, &label, o)?;
+        // Re-read just before deleting: if anything wrote to the file since we read it (Claude Code itself can), do not delete — the new content is not in the backup.
+        if fs::read_to_string(&settings).ok().as_deref() != Some(o) {
+            return Err(format!("{} changed while uninstalling; nothing removed (backup: {}). Run uninstall again.", settings.display(), b.display()));
+        }
+        fs::remove_file(&settings).map_err(|_| format!("could not remove {}; backup: {}", settings.display(), b.display()))?;
+        let _ = fs::remove_file(marker_path(base));
+        out.push(format!("{}:", settings.display()));
+        out.extend(change.lines);
+        out.push(format!("removed {} (install created it and nothing else is in it); backup: {}", settings.display(), b.display()));
+        out.push(format!("the programs in {} were left in place; delete that folder if you no longer need them", dir.display()));
         return Ok(out.join("\n"));
     }
     if cmd == "install" {
@@ -517,6 +707,14 @@ pub fn run(cmd: &str, args: &[String], env: &InstallEnv) -> Result<String, Strin
         }
         // Install already copied the files, so say plainly: copied, but hook entry not added.
         write_settings(&settings, &change.text).map_err(|e| if cmd == "install" { format!("{e}: the programs were copied to {} but the hook was not added", dir.display()) } else { e })?;
+        if cmd == "install" {
+            if let Some(warn) = note_created(base, &settings, original.as_deref(), &change.text, true) {
+                out.push(warn);
+            }
+        } else if marker.is_some() {
+            // Our entries are gone; what install created is no longer ours to track.
+            let _ = fs::remove_file(marker_path(base));
+        }
     }
     out.push(format!("{}:", settings.display()));
     out.extend(change.lines);
@@ -628,14 +826,20 @@ pub fn edit_start(env: &InstallEnv, user: bool, add: bool) -> Result<String, Str
             None => return Ok(format!("{}: no SessionStart entry", settings.display())),
         }
     };
+    let mut warn = None;
     if change.changed {
         if let Some(o) = &original {
             let label = if user { "user".to_string() } else { env.project.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "project".into()) };
             backup(env, &label, o)?;
         }
         write_settings(&settings, &change.text)?;
+        if add {
+            // Usage counts on after install: the SessionStart list it creates belongs to install's marker. No marker = not install's file (kept).
+            warn = note_created(base, &settings, original.as_deref(), &change.text, false);
+        }
     }
     let mut out = vec![format!("{}:", settings.display())];
     out.extend(change.lines);
+    out.extend(warn);
     Ok(out.join("\n"))
 }

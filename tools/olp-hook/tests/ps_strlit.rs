@@ -41,10 +41,12 @@ fn card(tool: &str, cmd: &str) -> String {
 // Realistic English-language command verbatim plus lone strings (double and single quotes)
 #[test]
 fn t1_lone_string_statements_are_output_only() {
-    no_card(r#"Get-ChildItem -Directory -Force | Select-Object Name; if (Test-Path build) { "--- build ---"; Get-ChildItem build -Force | Select-Object -First 20 Name; (Get-ChildItem build -Recurse -File -Force | Measure-Object -Property Length -Sum) | Select-Object Count,Sum; git status --short --ignored build | Select-Object -First 5; git ls-files build | Select-Object -First 5 }"#);
+    // moved to simple_form_only::reads_that_now_ask (rc4 rev 15: not a simple form → asks)
     no_card(r#""--- build ---""#);
     no_card("'--- build ---'");
-    no_card(r#"Get-ChildItem build; "---notes.txt---"; Get-Content build\a.txt"#);
+    // `Get-ChildItem build; "---notes.txt---"; Get-Content build\a.txt`: moved to simple_form_only::reads_that_now_ask (rc4 rev 17-2:
+    // backslash path outside the read allow list → asks); the same lone string with a forward slash path still passes
+    no_card(r#"Get-ChildItem build; "---notes.txt---"; Get-Content build/a.txt"#);
 }
 
 // $(...) inside double quotes runs the string, so it is not a read
@@ -84,9 +86,9 @@ fn t4_string_redirect_or_out_file_still_overwrite_card() {
 // A redirect target of exactly `$null` (case-insensitive) is a discard sink; `$nullx` or any other variable prompts as an overwrite as before
 #[test]
 fn c9_redirect_to_dollar_null_is_a_null_sink() {
-    no_card("git status --short -- build 2>$null");
-    no_card("Get-ChildItem build 2>$NULL | Select-Object Name");
-    no_card("Get-ChildItem build >$Null");
+    // `git status --short -- build 2>$null`, `Get-ChildItem build 2>$NULL | Select-Object Name`, `Get-ChildItem build >$Null`: moved to
+    // simple_form_only::reads_that_now_ask (rc4 rev 17-2: `$` and any `>` other than the four discard words are outside the read
+    // allow list → asks); the overwrite side below is unchanged
     for cmd in ["git status 2>$nullx", "git status 2>$x", "Get-ChildItem build > $out"] {
         let out = card("PowerShell", cmd);
         assert!(out.contains("overwrite"), "{cmd}: {out}");

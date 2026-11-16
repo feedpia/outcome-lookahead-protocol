@@ -3,7 +3,7 @@
     "PreToolUse": [
       {
         "matcher": "Bash|PowerShell|mcp__.*",
-        "hooks": [{ "type": "command", "command": "olp-hook", "timeout": 10 }]
+        "hooks": [{ "type": "command", "command": "olp-hook", "timeout": 10, "onFailure": "block" }]
       }
     ],
     "PostToolUse": [

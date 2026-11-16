@@ -25,3 +25,27 @@ pub fn require_ps_parser_or_env_fallback<T: std::fmt::Debug>(what: &str, mut run
     assert!(olp_hook::ps_ast::parse("Get-Date").is_none(), "{what}: parser is alive (parsed Get-Date) but this command never got a parser result in 3 attempts = parser regression");
     eprintln!("{what}: parser did not start within 1.5 s; fell back to the built-in list (safe side), accepted");
 }
+
+/// The same gate for a test that knows its command (FLAKY_2026-11-14 form A, ps_block2::b4: 1 failure in 372 on a busy machine).
+/// Slowness and regression are told apart without a clock: when every attempt fell back, the same command is parsed with a 60 s
+/// limit. If the parser reads it, the hook only fell back because powershell.exe started slowly (safe side) — accepted. If it cannot
+/// read it even then, the parser path is broken for this command — fail.
+pub fn require_ps_parser_for_cmd<T: std::fmt::Debug>(cmd: &str, mut run: impl FnMut() -> T, parsed_ok: impl Fn(&T) -> bool, fallback_ok: impl Fn(&T) -> bool) {
+    if !olp_hook::ps_ast::enabled() {
+        let v = run();
+        assert!(fallback_ok(&v), "{cmd}: parser unavailable, so the result must match the built-in list (ask side): {v:?}");
+        return;
+    }
+    for _ in 0..3 {
+        let v = run();
+        if parsed_ok(&v) {
+            return;
+        }
+        assert!(fallback_ok(&v), "{cmd}: result matches neither the parser path nor the fallback (built-in list): {v:?}");
+    }
+    assert!(
+        olp_hook::ps_ast::parse_within(cmd, std::time::Duration::from_secs(60)).is_some(),
+        "{cmd}: the parser cannot read this command even without a start-up limit = parser regression"
+    );
+    eprintln!("{cmd}: parser started slowly 3 times; the hook fell back to the built-in list (safe side), accepted");
+}

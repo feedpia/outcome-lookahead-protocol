@@ -64,10 +64,10 @@ fn f1_using_module_asks_and_nothing_runs() {
 fn f2_type_conversion_to_non_value_type_asks() {
     asks(r#"[System.IO.StreamWriter]'build\a.txt'"#);
     asks(r#"Get-ChildItem build | ForEach-Object { [IO.FileStream]$_.FullName }"#);
-    passes_with_parser(r#"Get-ChildItem build | ForEach-Object { [int]$_.Length }"#);
+    // moved to simple_form_only::reads_that_now_ask (rc4 rev 15: not a simple form → asks)
     // `-as [type]` also calls a constructor (creates a file on PS 5.1), so only value types count as reads
     asks(r#"Get-ChildItem build | ForEach-Object { $_.FullName -as [IO.StreamWriter] }"#);
-    passes_with_parser(r#"Get-ChildItem build | ForEach-Object { '1' -as [int] }"#);
+    // moved to simple_form_only::reads_that_now_ask (rc4 rev 15: not a simple form → asks)
 }
 
 // Value-type static write heads must ask (unknown); no claim that they modify files (`[regex]::Replace` touches no file)
@@ -89,8 +89,7 @@ fn f3_parameter_arguments_and_abbreviations() {
     asks(r#"Get-ChildItem build | Where-Object -F $sb"#);
     asks(r#"Get-ChildItem build | Where-Object -FilterScript:$sb"#);
     asks(r#"Get-ChildItem build | Where-Object -Fi:$sb"#);
-    passes_with_parser(r#"Get-ChildItem build | ForEach-Object -Process:{ $_.Name }"#);
-    passes_with_parser(r#"Get-ChildItem build | Where-Object -FilterScript:{ $_.Length -gt 0 }"#);
+    // moved to simple_form_only::reads_that_now_ask (rc4 rev 15: not a simple form → asks)
 }
 
 // No facts means unknown (ask). Statements outside the allowlist (switch, class, trap, ...) also ask
@@ -106,7 +105,7 @@ fn r1_r2_no_facts_or_unlisted_nodes_ask() {
 #[test]
 fn f7_static_write_methods_on_value_types_card() {
     asks(r#"Get-ChildItem build | ForEach-Object { [IO.Path]::GetTempFileName() }"#);
-    passes_with_parser(r#"Get-ChildItem build | ForEach-Object { [IO.Path]::GetFileName($_.FullName) }"#);
+    // moved to simple_form_only::reads_that_now_ask (rc4 rev 15: not a simple form → asks)
 }
 
 // Info line is ASCII and at most 80 chars (no control characters, no long text)

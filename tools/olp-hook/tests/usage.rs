@@ -20,7 +20,15 @@ fn tmp(name: &str) -> (PathBuf, PathBuf) {
     let (p, h) = (root.join("proj"), root.join("home"));
     fs::create_dir_all(p.join(".olp")).unwrap();
     fs::create_dir_all(&h).unwrap();
+    // rev 17-3: config lives in the user's trust folder for this project path; drop leftovers from an earlier run
+    let _ = fs::remove_dir_all(olp_hook::store::trust_dir(&p));
     (p, h)
+}
+
+/// Write the project config where the in-process code reads it (the user's trust folder for `p`, rev 17-3).
+fn write_config(p: &Path, body: &str) {
+    fs::create_dir_all(olp_hook::store::trust_dir(p)).unwrap();
+    fs::write(olp_hook::config::path(p), body).unwrap();
 }
 
 fn now() -> u64 {
@@ -95,7 +103,10 @@ fn c1_planted_project_files_never_opt_in_or_redirect() {
     let (p, h) = tmp("c1_planted");
     // Plant a legacy share.json plus a foreign endpoint
     fs::write(p.join(".olp/share.json"), json!({"opt_in": true, "id": "3f2b9c1e-5a7d-4e0f-9b1c-2d3e4f5a6b7c"}).to_string()).unwrap();
-    fs::write(p.join(".olp/hook-config.json"), json!({"signal_endpoint": "https://attacker.example.invalid/x"}).to_string()).unwrap();
+    let foreign = json!({"signal_endpoint": "https://attacker.example.invalid/x"}).to_string();
+    fs::write(p.join(".olp/hook-config.json"), &foreign).unwrap();
+    // rev 17-3: the project-local file above is ignored anyway; put the same endpoint where the config is read so the check keeps its meaning
+    write_config(&p, &foreign);
     assert_eq!(off(&p, &h), "not opted in", "share.json inside the repo is not consent");
     // Even after the user opts in, a different endpoint in project config is ignored (bundled endpoint wins)
     assert!(signal::consent(&p, &h, "y", "manual").unwrap());
@@ -112,7 +123,7 @@ fn c1_planted_project_files_never_opt_in_or_redirect() {
 fn c1_project_config_can_only_turn_it_off() {
     let (p, h) = tmp("c1_off");
     opt_in_to(&p, &h, FAKE);
-    fs::write(p.join(".olp/hook-config.json"), json!({"signal_endpoint": ""}).to_string()).unwrap();
+    write_config(&p, &json!({"signal_endpoint": ""}).to_string());
     assert_eq!(off(&p, &h), "no signal_endpoint set", "empty string means off");
 }
 
@@ -260,7 +271,7 @@ fn t4_body_is_closed_list_with_counts_only() {
 fn t4_after_decision_counts_the_next_delete_within_ten_minutes() {
     let (p, h) = tmp("t4_after");
     opt_in_to(&p, &h, FAKE);
-    fs::write(p.join(".olp/hook-config.json"), json!({"decision": true}).to_string()).unwrap();
+    write_config(&p, &json!({"decision": true}).to_string());
     let t = yesterday_noon() - 20_000;
     log(
         &p,
@@ -294,9 +305,12 @@ fn f6_open_decision_window_waits_for_next_send() {
     let b: Value = serde_json::from_str(&body).unwrap();
     assert_eq!(b["decision_asked"], 0, "not counted yet");
     assert!(counted_to <= t, "counted-to = now minus 10 minutes");
-    // The next send counts from that point, so this card is included
+    // The next send counts from that point, so this card is included. `send` plans again with its own clock, so the saved point may be
+    // a second later than `counted_to` (FLAKY_2026-11-14: the exact-equal check failed when the second ticked over); what must hold is
+    // that the card is still ahead of the saved point.
     let _ = signal::send(&p, &h).unwrap();
-    assert_eq!(record(&p, &h)["counted_to"], json!(counted_to));
+    let saved = record(&p, &h)["counted_to"].as_u64().unwrap();
+    assert!(saved >= counted_to && saved <= t, "saved {saved}, planned {counted_to}, card at {t}");
 }
 
 #[test]
@@ -438,7 +452,7 @@ fn d1_arguments_ignore_curlrc_and_redirects_with_a_short_cap() {
     };
     assert!((1..=5).all(r) && !r(6) && !r(0), "time limit allowed only at 1-5 seconds (SessionStart itself uses the bundled 5 s, checked above)");
     // A time limit from project config is not used
-    fs::write(p.join(".olp/hook-config.json"), json!({"signal_timeout_s": 3}).to_string()).unwrap();
+    write_config(&p, &json!({"signal_timeout_s": 3}).to_string());
     assert!(ready(&p, &h).0.join(" ").contains("--max-time 5"));
     let mut no_q = signal::spawn::argv("https://x/y", 2);
     no_q.remove(0);
@@ -481,7 +495,10 @@ fn d3_session_start_prints_nothing_and_exits_zero() {
     }
     // No output and exit 0 even without consent, with broken config, or without curl (empty PATH)
     let (project, home) = tmp("d3_broken");
-    fs::write(project.join(".olp/hook-config.json"), "{broken").unwrap();
+    // rev 17-3: the binary runs with HOME/USERPROFILE = `home`, so its trust folder is under the fake home, keyed by CLAUDE_PROJECT_DIR
+    let t = home.join("olp").join("projects").join(olp_hook::store::project_key(&project));
+    fs::create_dir_all(&t).unwrap();
+    fs::write(t.join("hook-config.json"), "{broken").unwrap();
     let o = run_bin(&project, &home, &["signal", "--session-start"], b"", None);
     assert_eq!(o.status.code(), Some(0));
     assert!(o.stdout.is_empty() && o.stderr.is_empty());

@@ -25,6 +25,34 @@ fn allow(file: &Path, rules: &[&str]) {
     fs::write(file, json!({ "permissions": { "allow": rules } }).to_string()).unwrap();
 }
 
+/// 0.1.3 ① (DESIGN_OLP_013_RULES §4·§6 T1): the install-end count no longer misses delete-by-definition forms, `Clear-Item`, and rules whose prefix runs any command.
+#[test]
+fn broad_counts_delete_by_definition_and_any_command_runners() {
+    for r in [
+        "PowerShell(robocopy:*)",
+        "Bash(robocopy:*)",
+        "PowerShell(Format-Volume:*)",
+        "PowerShell(Clear-RecycleBin:*)",
+        "PowerShell(%:*)",
+        "PowerShell(ForEach-Object:*)",
+        "PowerShell(Clear-Item:*)",
+        "PowerShell(iex:*)",
+        "PowerShell(Invoke-Expression:*)",
+        "PowerShell(Invoke-Command:*)",
+        "PowerShell(pwsh -c:*)",
+        "PowerShell(powershell -c:*)",
+        "PowerShell(&:*)",
+        "Bash(sh -c:*)",
+        "Bash(bash -c:*)",
+        "Bash(cmd /c:*)",
+    ] {
+        assert!(rules::broad(r), "{r} is a broad rule");
+    }
+    for r in ["PowerShell(Remove-ItemProperty:*)", "PowerShell(Stop-Process:*)"] {
+        assert!(!rules::broad(r), "{r} is not a file delete or overwrite");
+    }
+}
+
 #[test]
 fn broad_rules_are_wildcards_that_reach_a_delete_or_overwrite() {
     for r in [

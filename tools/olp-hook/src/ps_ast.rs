@@ -98,6 +98,13 @@ pub fn enabled() -> bool {
 
 /// /// Command text → facts. None = parser unavailable (the caller decides with the current list).
 pub fn parse(cmd: &str) -> Option<Vec<Fact>> {
+    parse_within(cmd, LIMIT)
+}
+
+/// Same as [`parse`] with the start-up limit given. The hook always uses [`parse`] (1.5 s); tests use a long limit to tell
+/// «the parser cannot read this command» (a regression) from «powershell.exe started slowly on a busy machine».
+#[doc(hidden)]
+pub fn parse_within(cmd: &str, limit: Duration) -> Option<Vec<Fact>> {
     if !enabled() {
         return None;
     }
@@ -124,7 +131,7 @@ pub fn parse(cmd: &str) -> Option<Vec<Fact>> {
     loop {
         match child.try_wait() {
             Ok(Some(status)) if status.success() => break,
-            Ok(None) if start.elapsed() < LIMIT => std::thread::sleep(Duration::from_millis(10)),
+            Ok(None) if start.elapsed() < limit => std::thread::sleep(Duration::from_millis(10)),
             _ => {
                 let _ = child.kill();
                 let _ = child.wait();

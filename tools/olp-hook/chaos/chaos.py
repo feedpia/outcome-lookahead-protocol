@@ -3,8 +3,12 @@
 The hook never runs commands; it only classifies them. A cell passes when there is no panic, the exit code is
 0 or 2, and no delete/overwrite input ever comes back as exit 0 with empty output (a silent pass, a "leak").
 
+Group 9 (0.1.3, DESIGN_OLP_013_TAG_GATE §2-2): 8 broken install markers, then a real `olp-hook uninstall`. A case passes when there is
+no panic, uninstall exits 0, and the settings file install created is kept (a marker it cannot trust deletes nothing). These are counted
+apart from the 78 cells (`marker_total`, `marker_ok`), so the 78 keep their 0.1.2 meaning.
+
 Run: python -I tools/olp-hook/chaos/chaos.py --hook <olp-hook(.exe)> --out qual.json --os <key> --work <folder>
-Writes one release-gate receipt (qual.json) and exits 0 only when all 78 cells pass.
+Writes one release-gate receipt (qual.json) and exits 0 only when all 78 cells and all 8 marker cases pass.
 """
 import argparse
 import datetime
@@ -18,16 +22,25 @@ import threading
 import time
 
 EXPECTED_CELLS = 78
+EXPECTED_MARKER = 8
+MARKER_REL = os.path.join(".olp", "install-created-settings.json")
 EXE = ""
 WORK = ""
 rows = []
+marker_rows = []
 
 
-def summarize(rows):
-    """Counts for the receipt and whether the run passes (total 78, all ok, no panic, no leak)."""
+def summarize(rows, marker=None):
+    """Counts for the receipt and whether the run passes (total 78, all ok, no panic, no leak; with `marker`: 8 of 8 as well).
+    Marker cases never enter `total`/`ok`; a panic in one is still a panic."""
     leaks = sum(1 for r in rows if r["risky"] and r["exit"] == 0 and r["decision"] == "pass")
-    counts = {"total": len(rows), "ok": sum(1 for r in rows if r["ok"]), "panics": sum(1 for r in rows if r["panic"]), "leaks": leaks}
+    every = rows + (marker or [])
+    counts = {"total": len(rows), "ok": sum(1 for r in rows if r["ok"]), "panics": sum(1 for r in every if r["panic"]), "leaks": leaks}
     ok = counts["total"] == EXPECTED_CELLS and counts["ok"] == EXPECTED_CELLS and counts["panics"] == 0 and counts["leaks"] == 0
+    if marker is not None:
+        counts["marker_total"] = len(marker)
+        counts["marker_ok"] = sum(1 for r in marker if r["ok"])
+        ok = ok and counts["marker_total"] == EXPECTED_MARKER and counts["marker_ok"] == EXPECTED_MARKER
     return counts, ok
 
 
@@ -229,6 +242,92 @@ def run_cases():
           (0 if len(os.listdir(os.path.join(p, "build"))) == 3 and open(os.path.join(p, "keep.txt")).read() == "old" else 1, "", "", 0), False)
 
 
+def run_cli(args, project, timeout=60):
+    """`olp-hook <args>` in the project folder, no terminal, fake home (install copies the program there)."""
+    t = time.time()
+    p = subprocess.run([EXE] + args, stdin=subprocess.DEVNULL, capture_output=True, env=env_for(None), cwd=project, timeout=timeout)
+    return p.returncode, p.stdout.decode("utf-8", "replace"), p.stderr.decode("utf-8", "replace"), round((time.time() - t) * 1000)
+
+
+def guards_kept(guards):
+    """True when every (path, bytes) guard file still exists with exactly those bytes."""
+    for path, data in guards:
+        try:
+            with open(path, "rb") as fh:
+                if fh.read() != data:
+                    return False
+        except OSError:
+            return False
+    return True
+
+
+def marker_case(case, breaker):
+    """install → break the marker with `breaker(project, marker_path)` → uninstall. Pass = no panic, exit 0, settings kept, project files
+    untouched, and every guard file the breaker returns (a file outside the project the broken marker points at) byte for byte the same."""
+    p = fresh("p9_" + str(len(marker_rows)))
+    settings = os.path.join(p, ".claude", "settings.json")
+    mp = os.path.join(p, MARKER_REL)
+    code, _, err, _ = run_cli(["install"], p)
+    if code != 0 or not os.path.isfile(settings) or not os.path.isfile(mp):
+        marker_rows.append({"cell": "9 install marker", "case": case, "exit": code, "decision": "setup", "ms": 0, "panic": "panicked" in err,
+                            "risky": False, "ok": False, "err1": "install did not leave settings + marker"})
+        return
+    guards = breaker(p, mp) or []
+    code, out, err, ms = run_cli(["uninstall"], p)
+    panic = "panicked" in err or "internal error" in err
+    kept = os.path.isfile(settings)
+    untouched = len(os.listdir(os.path.join(p, "build"))) == 3 and open(os.path.join(p, "keep.txt")).read() == "old"
+    outside_kept = guards_kept(guards)
+    ok = (not panic) and code == 0 and kept and untouched and outside_kept
+    marker_rows.append({"cell": "9 install marker", "case": case, "exit": code, "decision": ("kept" if kept else "deleted") + ("" if outside_kept else " +outside changed"), "ms": ms,
+                        "panic": panic, "risky": False, "ok": ok, "err1": err.strip().splitlines()[0][:90] if err.strip() else ""})
+
+
+def break_outside(_p, mp):
+    # a real file outside the project that the broken marker claims install created: uninstall must not delete or change it
+    target = os.path.join(WORK, "_outside", ".claude", "settings.json")
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    data = b'{"permissions": {"allow": ["Bash(ls:*)"]}, "owner": "not this project"}\n'
+    with open(target, "wb") as fh:
+        fh.write(data)
+    v = json.load(open(mp, encoding="utf-8"))
+    v["settings"] = target.replace("\\", "/")
+    json.dump(v, open(mp, "w", encoding="utf-8"))
+    return [(target, data)]
+
+
+def run_marker_cases():
+    def write(data):
+        def f(_p, mp):
+            with open(mp, "wb") as fh:
+                fh.write(data)
+        return f
+
+    def unknown_version(_p, mp):
+        v = json.load(open(mp, encoding="utf-8"))
+        v["v"] = 2
+        json.dump(v, open(mp, "w", encoding="utf-8"))
+
+    def other_project(_p, mp):
+        q = fresh("p9_other")
+        run_cli(["install"], q)
+        shutil.copyfile(os.path.join(q, MARKER_REL), mp)
+
+    def folder(_p, mp):
+        os.remove(mp)
+        os.makedirs(mp)
+
+    marker_case("empty file", write(b""))
+    marker_case("broken JSON", write(b'{"v":1,"settings":'))
+    marker_case("unknown v", unknown_version)
+    marker_case("another project's marker", other_project)
+    marker_case("marker path is a folder", folder)
+    marker_case("1 MB junk", write(os.urandom(1 << 20)))
+    marker_case("not UTF-8", write(b'{"v":1,"settings":"\xff\xfe","created_file":true,"created":[]}'))
+    marker_case("settings path outside the project", break_outside)
+    shutil.rmtree(os.path.join(WORK, "_outside"), ignore_errors=True)   # the guard file was only for that case
+
+
 def main(argv=None):
     global EXE, WORK
     ap = argparse.ArgumentParser(description="olp-hook chaos test (78 cells) -> release-gate receipt")
@@ -248,7 +347,8 @@ def main(argv=None):
     WORK = os.path.abspath(a.work)
     os.makedirs(WORK, exist_ok=True)
     run_cases()
-    counts, ok = summarize(rows)
+    run_marker_cases()
+    counts, ok = summarize(rows, marker_rows)
     run_id = os.environ.get("GITHUB_RUN_ID")
     receipt = {
         "kind": "chaos",
@@ -260,13 +360,15 @@ def main(argv=None):
         "hook_sha256": hashlib.sha256(open(EXE, "rb").read()).hexdigest(),
         "made_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "rows": rows,
+        "marker_rows": marker_rows,
     }
     os.makedirs(os.path.dirname(os.path.abspath(a.out)) or ".", exist_ok=True)
     with open(a.out, "w", encoding="utf-8") as f:
         json.dump(receipt, f, ensure_ascii=False, indent=1)
-    for r in rows:
+    for r in rows + marker_rows:
         print(("OK  " if r["ok"] else "FAIL"), r["cell"], "|", r["case"][:60], "| exit", r["exit"], "|", r["decision"], "|", r["ms"], "ms")
-    print("TOTAL", counts["total"], "OK", counts["ok"], "PANICS", counts["panics"], "LEAKS", counts["leaks"], "->", "PASS" if ok else "FAIL")
+    print("TOTAL", counts["total"], "OK", counts["ok"], "PANICS", counts["panics"], "LEAKS", counts["leaks"],
+          "MARKER", f"{counts['marker_ok']}/{counts['marker_total']}", "->", "PASS" if ok else "FAIL")
     return 0 if ok else 1
 
 

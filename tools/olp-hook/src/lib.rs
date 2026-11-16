@@ -17,6 +17,8 @@ pub mod pick;
 pub mod ps_ast;
 /// Reads broad "always allow" rules from user, project and local settings (read-only). Called only for the end-of-install notes.
 pub mod rules;
+/// Re-judges local Claude Code records with the hook's own `decide` (runs nothing, sends nothing, writes nothing in projects).
+pub mod replay;
 pub mod shell;
 /// Opt-in one-bit signal (default off). Hook and counting paths never call this module; only a person via `olp-hook signal`.
 pub mod signal;
@@ -25,4 +27,4 @@ pub mod store;
 /// Companion view (`olp-hook watch`) — reads the record only. Hook and counting paths never call this module.
 pub mod watch;
 
-pub use hook::{classify_cli, guarded, run_hook, GuardFail, HookOutcome};
+pub use hook::{classify_cli, decide, guarded, run_hook, Decided, GuardFail, HookOutcome, HookRequest, Route};

@@ -1,6 +1,8 @@
-//! Reduces needless prompts: common commands with no write form (git --version, git --no-pager reads, sleep, timeout <duration> <read>) count as reads, with nothing missed.
-// Value: protects=common read-only commands (git --version, git --no-pager <read>, sleep, timeout <duration> <read>) raise no permission prompt;
-//   fails_when=a delete, write or unknown command after timeout or --no-pager is passed as a read, or the deliberately excluded git -C and -c are opened up;
+//! Reduces needless prompts: common commands with no write form (git --version, git --no-pager reads, sleep) count as reads, with nothing missed.
+//! Since rc4 rev 15 (simple form only) `timeout <duration> <read>` is a wrapper form and asks.
+// Value: protects=common read-only commands (git --version, git --no-pager <read>, sleep) raise no permission prompt, and rc4 rev 15 wrappers
+//   (timeout <duration> <read>) ask; fails_when=a delete, write or unknown command after timeout or --no-pager is passed as a read, a timeout
+//   form passes as a read, or the deliberately excluded git -C and -c are opened up;
 //   why_new=top false-ask sources observed in replay (git, sleep and timeout forms); seam=classify::assess_bash (public); no_claim=false-ask counts for commands outside the replay.
 use olp_hook::classify::{assess_bash, Kind, Limits};
 use olp_hook::store::DeviceMap;
@@ -32,15 +34,19 @@ fn git_global_options_that_can_launch_programs_stay_unread() {
 
 #[test]
 fn sleep_is_a_read_and_keeps_loops_readable() {
-    for cmd in ["sleep 5", "sleep 5; tail -n 3 out.log", "until grep -q DONE out.log; do sleep 20; done; tail -n 5 out.log"] {
+    // `until grep -q DONE out.log; do sleep 20; done; tail -n 5 out.log`: moved to simple_form_only::reads_that_now_ask (rc4 rev 15: not a simple form → asks)
+    for cmd in ["sleep 5", "sleep 5; tail -n 3 out.log"] {
         assert!(read(cmd), "{cmd}: should be a read");
     }
 }
 
+// rc4 rev 15 (simple form only): `timeout` is a wrapper, and a wrapper in front is not a simple form, so even a wrapped read asks
+// now. These four used to assert «timeout + read = read»; they now assert the opposite rather than being moved, so this test
+// does not keep claiming that timeout reads pass.
 #[test]
 fn timeout_wraps_the_command_after_its_duration() {
     for cmd in ["timeout 30 tail -n 5 out.log", "timeout -k 5 30 grep -c x out.log", "timeout --signal=KILL 10s cat a.txt", "timeout -s KILL 10 head -3 a.txt"] {
-        assert!(read(cmd), "{cmd}: wrapped command is a read, so a read");
+        assert!(!read(cmd), "{cmd}: a wrapper is not a simple form, so not a read (rc4 rev 15)");
     }
     for cmd in ["timeout 30 deno test", "timeout 30 cargo build", "timeout 30"] {
         assert!(!read(cmd), "{cmd}: must not be a read");

@@ -41,6 +41,16 @@ test('package texts do not mention the picker', () => {
   }
 });
 
+test('package README says usage numbers are off by default and how to answer and turn off', () => {
+  const fs = require('node:fs');
+  const s = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
+  assert.match(s, /off by default/);
+  assert.match(s, /\[y\/N\]/);
+  assert.match(s, /without a terminal[^.]*sends nothing/);
+  assert.match(s, /send counts with a random per-project ID/);
+  assert.ok(s.includes('npx @feedpia/olp telemetry off'));
+});
+
 test('linux arm64 goes to olp-hook of the linux-arm64 package', () => {
   const p = plan('linux', 'arm64', ['install'], found('/m'));
   assert.equal(p.error, undefined);

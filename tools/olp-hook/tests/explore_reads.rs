@@ -25,6 +25,8 @@ fn tmp(name: &str) -> PathBuf {
     for f in ["app.log", "cache.tmp", "notes.txt"] {
         fs::write(p.join("build").join(f), "x").unwrap();
     }
+    // rev 17-3: answers live in the user's trust folder for this project path; drop leftovers from an earlier run
+    let _ = fs::remove_dir_all(olp_hook::store::trust_dir(&p));
     p
 }
 
@@ -36,29 +38,23 @@ fn call(p: &Path, tool: &str, cmd: &str) -> HookOutcome {
 /// Pinned material version: first 16 hex of the sha256 of explore_commands.txt = 31300cf4d231bbcf (one B line added; previous version 9270c5dc5488d5e9). Update this value whenever lines are added.
 /// A. Exploration: must produce no card. (source = session record time UTC, tool, command)
 const READS: &[(&str, &str, &str)] = &[
-    ("2026-11-02T10:21:09.835Z", "PowerShell", r#"Get-ChildItem build -Recurse -Force | Select-Object FullName,Length,LastWriteTime; Get-Content build\notes.txt -TotalCount 30; git log --oneline -3 -- build"#),
+    // moved to simple_form_only::reads_that_now_ask (rc4 rev 17-2: backslash path outside the read allow list → asks)
     ("2026-11-02T10:28:05.557Z", "PowerShell", r#"Get-ChildItem -Recurse -Force build | Select-Object FullName, Length, LastWriteTime"#),
-    ("2026-11-02T11:29:35.669Z", "PowerShell", r#"Get-ChildItem build -Recurse -File | Select-Object FullName, Length, LastWriteTime; git ls-files build; "---notes.txt---"; Get-Content build\notes.txt -TotalCount 20"#),
+    // moved to simple_form_only::reads_that_now_ask (rc4 rev 17-2: backslash path outside the read allow list → asks)
     ("2026-11-02T12:59:19.071Z", "Bash", r#"cd "D:/work/proj" && ls -d build 2>&1 && du -sh build 2>/dev/null && git check-ignore build; git ls-files build | head -3"#),
-    ("2026-11-02T13:08:31.017Z", "PowerShell", r#"Get-ChildItem -Directory -Recurse -Depth 2 -Filter build -ErrorAction SilentlyContinue | Select-Object FullName; git status --short | Select-Object -First 20; if (Test-Path build) { (Get-ChildItem build -Recurse -File | Measure-Object -Property Length -Sum) | Select-Object Count, Sum; git ls-files build | Select-Object -First 5; git check-ignore build }"#),
-    ("2026-11-02T13:09:27.894Z", "PowerShell", r#"Get-ChildItem build -Recurse -Force | Select-Object FullName, Length, LastWriteTime; Write-Output "--- notes.txt ---"; Get-Content build\notes.txt -TotalCount 20"#),
-    ("2026-11-02T13:14:15.934Z", "PowerShell", r#"Get-ChildItem -Directory -Force | Select-Object Name; git status --short | Select-Object -First 20; if (Test-Path build) { (Get-ChildItem build -Recurse -Force | Measure-Object -Property Length -Sum) | Select-Object Count, Sum; git ls-files build | Select-Object -First 5; git check-ignore build }"#),
-    ("2026-11-02T13:14:49.072Z", "PowerShell", r#"Get-ChildItem build -Recurse -Force | Select-Object FullName, Length, LastWriteTime; Get-Content build\notes.txt -TotalCount 30"#),
+    // moved to simple_form_only::reads_that_now_ask (rc4 rev 15: not a simple form → asks)
+    // moved to simple_form_only::reads_that_now_ask (rc4 rev 17-2: backslash path outside the read allow list → asks)
+    // moved to simple_form_only::reads_that_now_ask (rc4 rev 15: not a simple form → asks)
+    // moved to simple_form_only::reads_that_now_ask (rc4 rev 17-2: backslash path outside the read allow list → asks)
     ("2026-11-03T01:56:32.679Z", "PowerShell", r#"Get-ChildItem -Directory -Filter build -Recurse -Depth 2 -ErrorAction SilentlyContinue | Select-Object FullName, LastWriteTime; git status --short | Select-Object -First 10; git check-ignore build"#),
     ("2026-11-03T01:56:56.778Z", "PowerShell", r#"Get-ChildItem -Recurse -Force build | Select-Object FullName, Length; git ls-files build | Select-Object -First 5"#),
     ("2026-11-03T01:59:38.419Z", "PowerShell", r#"Test-Path build; git status --short"#),
-    ("2026-11-03T01:59:42.630Z", "PowerShell", r#"Get-ChildItem -Recurse -Force build | Select-Object FullName, Length, LastWriteTime; Get-Content build\notes.txt"#),
-    ("2026-11-03T02:04:06.711Z", "PowerShell", r#"Get-ChildItem -Directory -Force | Select-Object Name; if (Test-Path build) { "--- build ---"; Get-ChildItem build -Force | Select-Object -First 20 Name; (Get-ChildItem build -Recurse -File -Force | Measure-Object -Property Length -Sum) | Select-Object Count,Sum; git status --short --ignored build | Select-Object -First 5; git ls-files build | Select-Object -First 5 }"#),
+    // moved to simple_form_only::reads_that_now_ask (rc4 rev 17-2: backslash path outside the read allow list → asks)
+    // moved to simple_form_only::reads_that_now_ask (rc4 rev 15: not a simple form → asks)
 ];
 
-/// Group A commands containing Where-Object / ForEach-Object blocks: where a PowerShell parser is available (Windows) no card and within 2 s,
-/// elsewhere (macOS/Linux CI) a card as today (fallback = ask).
-const PARSER_READS: &[(&str, &str, &str)] = &[
-    ("2026-11-02T10:21:04.168Z", "PowerShell", r#"Get-ChildItem -Directory -Recurse -Depth 2 -Filter build -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch 'node_modules' } | Select-Object FullName; git status --short | Select-Object -First 20; if (Test-Path build) { (Get-ChildItem build -Recurse -File | Measure-Object -Sum Length) | Select-Object Count,Sum; git ls-files build | Select-Object -First 5 }"#),
-    ("2026-11-02T10:26:19.091Z", "PowerShell", r#"Get-ChildItem -Directory -Recurse -Depth 2 -Filter build -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch 'node_modules' } | Select-Object FullName, LastWriteTime; git status --short | Select-Object -First 20; git check-ignore build"#),
-    ("2026-11-02T11:25:40.809Z", "PowerShell", r#"Get-ChildItem -Directory -Recurse -Depth 2 -Filter build -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch 'node_modules' } | ForEach-Object { $s = (Get-ChildItem $_.FullName -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum); "{0}  files={1}  MB={2:N1}" -f $_.FullName, $s.Count, ($s.Sum/1MB) }; git status --short -- build 2>$null | Select-Object -First 5; git ls-files build | Measure-Object | Select-Object -ExpandProperty Count"#),
-    ("2026-11-03T02:08:14.977Z", "PowerShell", r#"Get-ChildItem -Directory -Recurse -Depth 3 -Filter build -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch 'node_modules' } | ForEach-Object { $s = (Get-ChildItem $_.FullName -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum); "{0} | files={1} | MB={2:N1}" -f $_.FullName, $s.Count, ($s.Sum/1MB) }; git status --short | Select-Object -First 10; git check-ignore build"#),
-];
+// Group A commands containing Where-Object / ForEach-Object blocks (PARSER_READS, test block_reads_need_the_parser_and_stay_fast):
+// moved to simple_form_only::reads_that_now_ask (rc4 rev 15: not a simple form → asks)
 
 /// B. Deletes from the same sessions: must produce a card (the 2 lines without a time have no time in the source file either).
 const DELETES: &[(&str, &str, &str)] = &[
@@ -88,21 +84,6 @@ fn field_explore_reads_show_no_card() {
     assert!(bad.is_empty(), "{} exploration commands produced a card:\n{}", bad.len(), bad.join("\n"));
 }
 
-/// Parser present = no card; absent or slow start = ask as today (shared gate common::require_ps_parser_or_env_fallback).
-/// The 1.5 s product limit and the 2 s per-call cap in this test are unchanged.
-#[test]
-fn block_reads_need_the_parser_and_stay_fast() {
-    for (src, tool, cmd) in PARSER_READS {
-        let run = || {
-            let t = std::time::Instant::now();
-            let o = call(&tmp("block"), tool, cmd);
-            assert!(t.elapsed().as_millis() < 2000, "{src}: {} ms", t.elapsed().as_millis());
-            o
-        };
-        common::require_ps_parser_or_env_fallback(&format!("{src} {tool}: {cmd}"), run, |o: &HookOutcome| o.stdout.trim().is_empty(), |o| o.stdout.contains("\"ask\""));
-    }
-}
-
 #[test]
 fn field_deletes_still_show_a_card() {
     for (src, tool, cmd) in DELETES {
@@ -120,11 +101,8 @@ fn call_mode(p: &Path, cmd: &str, mode: &str) -> HookOutcome {
 
 /// A. Reads containing only syntax words: no card (modes default and auto).
 const R1_READS: &[&str] = &[
-    r#"for d in build; do du -sh "$d"; done"#,
-    "if [ -d build ]; then ls build; fi",
-    r#"while read f; do cat "$f"; done < list.txt"#,
-    "test -d build && ls build",
-    "{ ls; git status --short; }",
+    // moved to simple_form_only::reads_that_now_ask (rc4 rev 15: not a simple form → asks)
+    // `test -d build && ls build`: moved to simple_form_only::reads_that_now_ask (rc4 rev 17-2: test is never a read → asks)
 ];
 
 #[test]
@@ -176,8 +154,11 @@ fn r1_writes_keep_the_exact_baseline_card() {
 
 /// C. Ask as today. Second value = text that must appear in the card (empty if none).
 const R1_ASKS: &[(&str, &str)] = &[
-    ("mytool --apply", r#"mytool\" read_only"#),
-    (r#"for d in x; do mytool "$d"; done"#, r#"mytool\" read_only"#),
+    // A flag right after the program: still asks, but no one-word group answer is offered (rc4 second review RECHECK 3f5b6b3ef blocking 1)
+    ("mytool --apply", ""),
+    ("mytool apply", r#"mytool apply\" read_only"#),
+    // A loop is a bundle: still asks, no remembered answer offered (ledger 1321 ①)
+    (r#"for d in x; do mytool "$d"; done"#, ""),
     ("case $x in a) ls;; esac", ""),
     (r#"eval "ls""#, ""),
     // Shell builtin names (`[`, test, read) count only as bare words without a path: `./test` and `tests/read` are real programs
@@ -202,29 +183,17 @@ fn r1_unknown_commands_still_ask() {
 
 // ---- read-only `$(…)` is expanded and inspected ----
 
-/// A. `$(…)` that is read-only inside and out: no card (modes default and auto). The first line is the verbatim case from an auto-mode measurement.
-const R2_READS: &[&str] = &[
-    r#"ls -la && git status --short | head; find . -maxdepth 3 -type d -name build -not -path "*/node_modules/*" 2>/dev/null; for d in $(find . -maxdepth 3 -type d -name build -not -path "*/node_modules/*"); do du -sh "$d"; git ls-files "$d" | head -3; git check-ignore "$d"; done"#,
-    "du -sh $(git rev-parse --show-toplevel)",
-    r#"echo "$(git status --short)""#,
-    r#"for f in $(find build -type f); do wc -c "$f"; done"#,
-    r#"echo "$(git log -1 --format="%h %s")""#,
-    "X=$(pwd) && ls build",
-    "cd $(echo /tmp) && ls",
-];
+// A. `$(…)` that is read-only inside and out (R2_READS, test r2_read_substitutions_show_no_card):
+// moved to simple_form_only::reads_that_now_ask (rc4 rev 15: not a simple form → asks)
 
+/// A shell assignment before a command, even on its own (`PATH=/tmp/x && ls`), can change which program the next command runs, so it
+/// always asks (rc4 second review RECHECK 21880f55a blocking 2) — `X=$(pwd) && ls build` moved here from R2_READS.
 #[test]
-fn r2_read_substitutions_show_no_card() {
-    let mut bad = Vec::new();
-    for mode in ["default", "auto"] {
-        for cmd in R2_READS {
-            let o = call_mode(&tmp("r2read"), cmd, mode);
-            if o.code != 0 || !o.stdout.trim().is_empty() {
-                bad.push(format!("[{mode}] {cmd}\n  → code {} {}{}", o.code, o.stdout.trim(), o.stderr.trim()));
-            }
-        }
+fn r2_assignment_before_a_read_still_asks() {
+    for cmd in ["X=$(pwd) && ls build", "PATH=/tmp/x && ls", "PATH=/tmp/x ls"] {
+        let o = call_mode(&tmp("r2assign"), cmd, "default");
+        assert!(o.stdout.contains("\"ask\""), "{cmd}: must ask: {}", o.stdout);
     }
-    assert!(bad.is_empty(), "{} read-only `$(…)` cases produced a card:\n{}", bad.len(), bad.join("\n"));
 }
 
 /// B/C. `$(…)` containing writes, unknowns or self-protection: verdicts identical to the trunk build (baseline in a stored jsonl, modes default and bypassPermissions).
@@ -250,10 +219,10 @@ const R3_READS: &[&str] = &[
     "sha256sum build/app.log | cut -c1-16",
     "md5sum build/app.log build/notes.txt",
     "sha256sum -c sums.txt --quiet 2>/dev/null",
-    "cmp -s build/app.log build/notes.txt && echo same",
-    "echo ab | tr a-z A-Z",
-    "tr -d x < build/app.log",
-    "echo $(sha256sum build/app.log | cut -c1-16)",
+    "cmp -s build/app.log build/notes.txt",
+    // `cmp -s … && echo same`, `echo ab | tr a-z A-Z`, `tr -d x < build/app.log`: moved to simple_form_only::reads_that_now_ask
+    // (rc4 rev 17-2: echo is never a read, `<` input is outside the read allow list → asks)
+    // moved to simple_form_only::reads_that_now_ask (rc4 rev 15: not a simple form → asks)
 ];
 
 #[test]
@@ -286,8 +255,7 @@ fn r3_names_still_ask_when_pathed_or_redirected() {
 const R3B_READS: &[&str] = &[
     "sed -n 1,40p build/notes.txt",
     "cd build && sed -n '10,20p' notes.txt",
-    "sed -n '1,5p;8p' build/notes.txt",
-    "sed -n '1,30p;30q' build/notes.txt | cut -c1-200",
+    // moved to simple_form_only::reads_that_now_ask (rc4 rev 15: not a simple form → asks)
     "sort build/app.log | uniq",
     "sort -u -k2 build/app.log",
     "uniq build/app.log",
@@ -401,7 +369,9 @@ fn m1_pathed_names_are_not_read_names() {
 
 #[test]
 fn m1_bare_names_still_pass() {
-    for (tool, cmd) in [("Bash", "ls -la"), ("Bash", "ls.exe build"), ("Bash", "sudo ls"), ("Bash", "cat build/app.log"), ("PowerShell", "Get-ChildItem build"), ("PowerShell", "echo hi")] {
+    // `sudo ls`: moved to simple_form_only::reads_that_now_ask (rc4 rev 15: not a simple form → asks)
+    // PowerShell `echo hi`: moved to simple_form_only::reads_that_now_ask (rc4 rev 17-2: echo is never a read → asks)
+    for (tool, cmd) in [("Bash", "ls -la"), ("Bash", "ls.exe build"), ("Bash", "cat build/app.log"), ("PowerShell", "Get-ChildItem build")] {
         let o = call(&tmp("m1ok"), tool, cmd);
         assert!(o.code == 0 && o.stdout.trim().is_empty(), "{tool}: {cmd} → {}", o.stdout);
     }
@@ -416,12 +386,7 @@ const R012_READS: &[&str] = &[
     "sed -n '1,$p' build/notes.txt",
     "sed -n -e 1p build/notes.txt",
     "sed -n -e '$p' -e 1p build/notes.txt",
-    "awk '{print $1}' build/app.log",
-    "awk -F: '{print $1}' build/app.log",
-    "awk -F ':' 'NR==2' build/app.log",
-    "awk -v n=2 'NR==n' build/app.log",
-    "ls build | awk '{print $NF}'",
-    "awk 'END{print NR}' build/app.log build/notes.txt",
+    // moved to simple_form_only::reads_that_now_ask (rc4 rev 15: not a simple form → asks)
     "git grep -n foo",
     "git grep -i foo -- build",
     "git --no-pager grep foo",
@@ -431,7 +396,7 @@ const R012_READS: &[&str] = &[
     "git -c color.ui=never log -1",
     "git -c core.quotepath=false status",
     "git -C build -c color.ui=always diff --stat",
-    "awk -F: -v a=1 '{print $1}' build/app.log",
+    // moved to simple_form_only::reads_that_now_ask (rc4 rev 15: not a simple form → asks)
     "git -C build -C . status",
 ];
 
@@ -532,9 +497,10 @@ fn r012_write_forms_still_ask() {
 fn r012_pathed_name_does_not_take_the_bare_name_answer() {
     let p = tmp("r012m1");
     olp_hook::classify_cli(&p, &["--bash".to_string(), "mytool".to_string(), "read_only".to_string()]).unwrap();
-    let bare = call_mode(&p, "mytool -l", "auto");
+    let bare = call_mode(&p, "mytool", "auto");
     assert!(bare.code == 0 && bare.stdout.trim().is_empty(), "bare name keeps its answer: {}", bare.stdout);
-    for cmd in ["./mytool -l", "bin/mytool -l", "cd build && ../mytool -l"] {
+    // A flagged form drops the subcommand, so the one-word answer does not cover it (rc4 second review RECHECK 3f5b6b3ef blocking 1)
+    for cmd in ["mytool -l", "./mytool -l", "bin/mytool -l", "cd build && ../mytool -l"] {
         let o = call_mode(&p, cmd, "auto");
         assert!(o.stdout.contains("\"ask\""), "must ask: {cmd}\n{}", o.stdout);
     }

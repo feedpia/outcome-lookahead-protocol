@@ -18,7 +18,15 @@ fn tmp(name: &str) -> PathBuf {
         fs::remove_dir_all(&p).unwrap();
     }
     fs::create_dir_all(&p).unwrap();
+    // rev 17-3: config lives in the user's trust folder for this project path; drop leftovers from an earlier run
+    let _ = fs::remove_dir_all(olp_hook::store::trust_dir(&p));
     p
+}
+
+/// Write the project config where the hook reads it (the user's trust folder, rev 17-3).
+fn write_config(p: &Path, body: &str) {
+    fs::create_dir_all(olp_hook::store::trust_dir(p)).unwrap();
+    fs::write(olp_hook::config::path(p), body).unwrap();
 }
 
 fn now() -> u64 {
@@ -28,7 +36,7 @@ fn now() -> u64 {
 /// Pick mode on (`pick: true`) plus the count limit. `alive` = Some(seconds ago) sets gui.alive to that time.
 fn setup(p: &Path, pick: bool, alive_ago_s: Option<u64>) {
     fs::create_dir_all(p.join(".olp")).unwrap();
-    fs::write(p.join(".olp/hook-config.json"), json!({"counter_timeout_ms": 3000, "hook_budget_ms": 8000, "pick": pick}).to_string()).unwrap();
+    write_config(p, &json!({"counter_timeout_ms": 3000, "hook_budget_ms": 8000, "pick": pick}).to_string());
     if let Some(ago) = alive_ago_s {
         let f = p.join(".olp/gui.alive");
         fs::write(&f, json!({"v": 1, "at": now() - ago, "port": 1}).to_string()).unwrap();
@@ -441,12 +449,11 @@ fn pending_file_has_names_hook_log_has_none() {
 #[test]
 fn config_pick_field_parses_and_unknown_still_rejected() {
     let p = tmp("cfg_pick");
-    fs::create_dir_all(p.join(".olp")).unwrap();
-    fs::write(p.join(".olp/hook-config.json"), r#"{"pick": true}"#).unwrap();
+    write_config(&p, r#"{"pick": true}"#);
     assert!(olp_hook::config::load(&p).unwrap().pick);
-    fs::write(p.join(".olp/hook-config.json"), r#"{}"#).unwrap();
+    write_config(&p, r#"{}"#);
     assert!(!olp_hook::config::load(&p).unwrap().pick);
-    fs::write(p.join(".olp/hook-config.json"), r#"{"pick": true, "pikc": true}"#).unwrap();
+    write_config(&p, r#"{"pick": true, "pikc": true}"#);
     assert!(olp_hook::config::load(&p).is_err());
 }
 
@@ -469,6 +476,8 @@ fn m4_tree(name: &str) -> (PathBuf, bool) {
 fn count_and_list_agree_on_same_tree() {
     let (p, linked) = m4_tree("m4_agree");
     if !linked {
+        // CI sets OLP_REQUIRE_SYMLINK=1 where links must work, so the link row cannot be skipped silently there.
+        assert!(std::env::var("OLP_REQUIRE_SYMLINK").as_deref() != Ok("1"), "m4: OLP_REQUIRE_SYMLINK=1 but a link could not be made");
         eprintln!("m4: link not made on this machine (needs symlink right) — link row skipped");
     }
     let args = ["a", "e", "nope", "top.txt"];

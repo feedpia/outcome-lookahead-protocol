@@ -1,8 +1,8 @@
 {
   "name": "olp-hook",
   "displayName": "OLP hook",
-  "version": "0.1.1",
-  "description": "Before an AI agent does something it can't undo, OLP counts what will be lost. This hook puts a card in the permission prompt before a shell command or MCP tool deletes, overwrites, or moves money. Runs on your device; the hook makes no network calls (an optional daily signal is off by default). Before engine check, no receipt.",
+  "version": "0.1.3",
+  "description": "Before an AI agent does something it can't undo, OLP counts what will be lost. This hook puts a card in the permission prompt before a shell command or MCP tool deletes, overwrites, or moves money. Runs on your device; the hook makes no network calls (an optional daily signal is off by default). Before engine check, no receipt. Needs olp-hook on your PATH: without it, shell and MCP calls are blocked (the npx install path does not need this).",
   "author": {
     "name": "FeedPia"
   },

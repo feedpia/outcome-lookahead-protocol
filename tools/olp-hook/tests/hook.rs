@@ -18,17 +18,29 @@ fn tmp(name: &str) -> PathBuf {
         fs::remove_dir_all(&p).unwrap();
     }
     fs::create_dir_all(&p).unwrap();
+    // rev 17-3: answers and config live in the user's trust folder for this project path; drop leftovers from an earlier run
+    let _ = fs::remove_dir_all(olp_hook::store::trust_dir(&p));
     p
+}
+
+/// rev 17-3: the answer file in the user's trust folder for this project (never inside the project).
+fn map_file(project: &Path) -> PathBuf {
+    olp_hook::store::trust_dir(project).join("hook-map.json")
+}
+
+/// Write the project config where the hook reads it (the user's trust folder, rev 17-3).
+fn write_config(project: &Path, body: &str) {
+    fs::create_dir_all(olp_hook::store::trust_dir(project)).unwrap();
+    fs::write(olp_hook::config::path(project), body).unwrap();
 }
 
 /// Counting-time limit and hook limit live in the project config file (no constants in code).
 fn set_config(project: &Path, quiet: Option<bool>, counter_ms: u64, budget_ms: u64) {
-    fs::create_dir_all(project.join(".olp")).unwrap();
     let mut v = json!({"counter_timeout_ms": counter_ms, "hook_budget_ms": budget_ms});
     if let Some(q) = quiet {
         v["quiet"] = json!(q);
     }
-    fs::write(project.join(".olp").join("hook-config.json"), v.to_string()).unwrap();
+    write_config(project, &v.to_string());
 }
 
 /// Existing tests classify in a mode that never shows a prompt (bypassPermissions), where risky commands are blocked (exit 2). Prompt-mode behaviour is covered via `hook_full`.
@@ -212,8 +224,7 @@ fn hook_error_or_timeout_blocks() {
     let o = run_hook(br#"{"tool_input":{}}"#, Some(&p));
     assert_eq!(o.code, 2);
     // (3) config file is corrupt -> blocked
-    fs::create_dir_all(p.join(".olp")).unwrap();
-    fs::write(p.join(".olp/hook-config.json"), "{broken").unwrap();
+    write_config(&p, "{broken");
     assert_eq!(bash(&p, "ls").code, 2);
     // (4) panic or timeout -> GuardFail (the caller turns it into a block)
     let r: Result<(), GuardFail> = guarded(|| panic!("boom"), Some(Duration::from_millis(500)));
@@ -291,7 +302,7 @@ fn device_map_stores_paths_and_kind_only() {
     let p = tmp("device_map");
     classify(&p, &["--bash", "npm run deploy --token=SECRET123 --amount 99000", "writes_other", "--reversible", "--recovery-declared"]).unwrap();
     classify(&p, &["--tool", "mcp__pay__charge", "moves_money"]).unwrap();
-    let raw = fs::read_to_string(p.join(".olp/hook-map.json")).unwrap();
+    let raw = fs::read_to_string(map_file(&p)).unwrap();
     for bad in ["SECRET123", "99000", "--token", "deploy", "--amount"] {
         assert!(!raw.contains(bad), "no argument values in the map: {bad} in {raw}");
     }
@@ -308,8 +319,10 @@ fn device_map_stores_paths_and_kind_only() {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let m = fs::metadata(p.join(".olp/hook-map.json")).unwrap().permissions().mode() & 0o777;
+        let m = fs::metadata(map_file(&p)).unwrap().permissions().mode() & 0o777;
         assert_eq!(m, 0o600);
+        let d = fs::metadata(olp_hook::store::trust_dir(&p)).unwrap().permissions().mode() & 0o777;
+        assert_eq!(d, 0o700, "the trust folder is private");
     }
 }
 
@@ -430,7 +443,7 @@ fn db_count_is_unknown_or_user_declared() {
     assert!(o.stderr.contains("count not checked") && !o.stderr.contains("42"), "{}", o.stderr);
     // not an integer -> unknown (CLI rejects it; a hand-edited map also reads as unknown)
     assert!(classify(&p, &["--bash", "sqlite3", "writes_other", "--db-count", "4.2"]).is_err());
-    let mp = p.join(".olp/hook-map.json");
+    let mp = map_file(&p);
     let mut v: Value = serde_json::from_str(&fs::read_to_string(&mp).unwrap()).unwrap();
     v["entries"]["bash:psql"]["db_count"]["n"] = json!("42");
     fs::write(&mp, v.to_string()).unwrap();
@@ -607,7 +620,8 @@ fn dangerous_forms_cannot_be_family_answered() {
     classify(&p, &["--bash", "git push", "read_only", "--reversible", "--recovery-declared"]).unwrap();
     classify(&p, &["--bash", "git reset", "read_only"]).unwrap();
     classify(&p, &["--bash", "psql", "read_only"]).unwrap();
-    classify(&p, &["--bash", "bash", "read_only"]).unwrap();
+    // 0.1.3 rc4: a bare interpreter answer is refused outright (design 1-5 §2-4), so `bash -c ...` can never take one
+    assert!(classify(&p, &["--bash", "bash", "read_only"]).is_err());
     set_config(&p, Some(true), 2000, 5000);
     assert_eq!(bash(&p, "git push origin main").code, 0, "not forced + answer = pass");
     classify(&p, &["--bash", "git checkout", "read_only"]).unwrap();
@@ -799,8 +813,7 @@ fn signal_off_by_default_and_sends_nothing() {
     let q = tmp("signal_noaddr");
     let qh = q.join("_home");
     signal::setup(&q, &qh, "yes").unwrap();
-    fs::create_dir_all(q.join(".olp")).unwrap();
-    fs::write(q.join(".olp/hook-config.json"), json!({"signal_endpoint": ""}).to_string()).unwrap();
+    write_config(&q, &json!({"signal_endpoint": ""}).to_string());
     assert!(matches!(signal::plan(&q, &qh).unwrap(), Plan::Off(_)));
     assert!(signal::send(&q, &qh).unwrap().contains("not sent"));
     assert!(signal::spawn::calls().is_empty(), "no signal wrapper calls");

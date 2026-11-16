@@ -20,6 +20,8 @@ fn tmp(name: &str) -> PathBuf {
         fs::remove_dir_all(&p).unwrap();
     }
     fs::create_dir_all(&p).unwrap();
+    // rev 17-3: config lives in the user's trust folder for this project path; drop leftovers from an earlier run
+    let _ = fs::remove_dir_all(olp_hook::store::trust_dir(&p));
     p
 }
 
@@ -40,7 +42,8 @@ fn project(name: &str, decision: Option<bool>, git_repo: bool, tracked: &[&str])
     if let Some(d) = decision {
         cfg["decision"] = json!(d);
     }
-    fs::write(p.join(".olp/hook-config.json"), cfg.to_string()).unwrap();
+    fs::create_dir_all(olp_hook::store::trust_dir(&p)).unwrap();
+    fs::write(olp_hook::config::path(&p), cfg.to_string()).unwrap();
     if git_repo {
         git(&p, &["init", "-q"]);
         if !tracked.is_empty() {

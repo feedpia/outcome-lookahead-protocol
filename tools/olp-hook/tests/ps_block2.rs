@@ -1,7 +1,7 @@
 //! Interpret PowerShell commands properly: a hybrid of the built-in Rust classifier and the PowerShell parser.
 //! PowerShell commands that the Rust classifier cannot decide are read by the PowerShell syntax parser (nothing executed); only parsed reads pass, and unknown input asks as before.
 // Value: protects=read-only listings containing Where-Object/ForEach-Object blocks raise no permission prompt and are not blocked in bypass mode, while deletes and method calls inside a block prompt;
-// fails_when=any of the five read forms prompts, any of the five write forms or five unknown forms passes without a prompt, or command text is executed by the parser script;
+// fails_when=the remaining read form prompts (block reads ask since rc4 rev 15, see simple_form_only::reads_that_now_ask), any of the five write forms or five unknown forms passes without a prompt, or command text is executed by the parser script;
 // why_new=the built-in list cannot see inside blocks; seam=classify::assess_shell -> ps_ast (Windows only; on failure fall back to the built-in list);
 // no_claim=PowerShell on macOS/Linux (no parser: built-in list plus an info line) and Bash.
 mod common;
@@ -48,13 +48,10 @@ fn asked(o: &HookOutcome) -> bool {
     o.stdout.contains("\"ask\"")
 }
 
-// The five read forms: only interpreted reads pass without a prompt
-const READS: [&str; 5] = [
-    r#"Get-ChildItem build | Where-Object { $_.FullName -notmatch 'node_modules' } | Select-Object FullName"#,
-    r#"Get-ChildItem build | ForEach-Object { $s = (Get-ChildItem $_.FullName -Recurse | Measure-Object Length -Sum); "{0} files={1}" -f $_.FullName, $s.Count }"#,
-    r#"Get-ChildItem build | ForEach-Object { $_.Name.ToLower() }"#,
+// The read forms: only interpreted reads pass without a prompt
+const READS: [&str; 1] = [
+    // moved to simple_form_only::reads_that_now_ask (rc4 rev 15: not a simple form → asks)
     r#"Get-ChildItem build | Where-Object Name -like '*.log'"#,
-    r#"if (Test-Path build) { "--- build ---"; git ls-files build | ForEach-Object { $_ } }"#,
 ];
 
 #[test]
@@ -88,7 +85,7 @@ fn b4_writes_and_deletes_inside_blocks_show_a_card() {
         assert!(o.stdout.contains("\"ask\""), "{cmd}: must prompt: {}{}", o.stdout, o.stderr);
         if delete {
             // Parser available: delete prompt. Unavailable or slow start: ask (prompt kind is left to the built-in list)
-            gate(cmd, || call(&tmp("write"), cmd), |o: &HookOutcome| asked(o) && msg(o).contains("delete files"), asked);
+            common::require_ps_parser_for_cmd(cmd, || call(&tmp("write"), cmd), |o: &HookOutcome| asked(o) && msg(o).contains("delete files"), asked);
         }
     }
 }
@@ -110,15 +107,8 @@ fn b2_unknown_stays_ask_with_an_info_line() {
     }
 }
 
-// Korean text and spaces in command text (UTF-8 pinned)
-#[test]
-fn p2_korean_and_spaces_in_command_text() {
-    let p = tmp("p2");
-    fs::write(p.join("build").join("한글 파일.txt"), "x").unwrap();
-    let cmd = r#"Get-ChildItem build | Where-Object { $_.Name -ne '한글 파일.txt' } | Select-Object Name"#;
-    // Parser available: Korean text is still a plain read (no prompt). Unavailable or slow start: ask
-    gate("p2 korean text", || call(&p, cmd), |o: &HookOutcome| o.code == 0 && o.stdout.trim().is_empty(), |o| o.code == 0 && asked(o));
-}
+// Korean text and spaces in command text (test p2_korean_and_spaces_in_command_text):
+// moved to simple_form_only::reads_that_now_ask (rc4 rev 15: not a simple form → asks)
 
 // Command text is data only: text that tries to break out of quotes executes nothing on the parser side
 #[test]

@@ -164,7 +164,14 @@
           "Not recognized: Where-Object, ForEach-Object"
         ]
       },
-      "expect_windows": {"decision": null, "reason": null, "message": null}
+      "expect_windows": {
+        "decision": "ask",
+        "reason": "[OLP] before engine check · no receipt",
+        "message": [
+          "OLP hook: check before it runs — before engine check · no receipt",
+          "Not classified yet for this project, so it is treated as a write."
+        ]
+      }
     },
     {
       "name": "powershell_pipe_not_counted",
@@ -185,25 +192,53 @@
       "name": "powershell_read_no_card",
       "files": ["build/a.txt"],
       "tool": "PowerShell", "input": {"command": "Get-ChildItem -Force -Directory | Select-Object Name; Test-Path .\\build; Get-ChildItem .\\build -Recurse -Force | Measure-Object"},
-      "expect": {"decision": null, "reason": null, "message": null}
+      "expect": {
+        "decision": "ask",
+        "reason": "[OLP] before engine check · no receipt",
+        "message": [
+          "OLP hook: check before it runs — before engine check · no receipt",
+          "Not classified yet for this project, so it is treated as a write."
+        ]
+      }
     },
     {
       "name": "powershell_if_block_read_no_card",
       "files": ["build/a.txt"],
       "tool": "PowerShell", "input": {"command": "Get-ChildItem -Directory -Recurse -Depth 2 -Filter build -ErrorAction SilentlyContinue | Select-Object FullName; git status --short | Select-Object -First 20; if (Test-Path build) { (Get-ChildItem build -Recurse -File | Measure-Object -Property Length -Sum) | Select-Object Count, Sum; git ls-files build | Select-Object -First 5; git check-ignore build }"},
-      "expect": {"decision": null, "reason": null, "message": null}
+      "expect": {
+        "decision": "ask",
+        "reason": "[OLP] before engine check · no receipt",
+        "message": [
+          "OLP hook: check before it runs — before engine check · no receipt",
+          "Not classified yet for this project, so it is treated as a write."
+        ]
+      }
     },
     {
       "name": "powershell_string_line_read_no_card",
       "files": ["build/a.txt"],
       "tool": "PowerShell", "input": {"command": "Get-ChildItem -Directory -Force | Select-Object Name; if (Test-Path build) { \"--- build ---\"; Get-ChildItem build -Force | Select-Object -First 20 Name; (Get-ChildItem build -Recurse -File -Force | Measure-Object -Property Length -Sum) | Select-Object Count,Sum; git status --short --ignored build | Select-Object -First 5; git ls-files build | Select-Object -First 5 }"},
-      "expect": {"decision": null, "reason": null, "message": null}
+      "expect": {
+        "decision": "ask",
+        "reason": "[OLP] before engine check · no receipt",
+        "message": [
+          "OLP hook: check before it runs — before engine check · no receipt",
+          "Not classified yet for this project, so it is treated as a write."
+        ]
+      }
     },
     {
       "name": "powershell_block_read_field_command_m27_05",
       "files": ["build/app.log"],
       "tool": "PowerShell", "input": {"command": "Get-ChildItem -Directory -Recurse -Depth 3 -Filter build -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch 'node_modules' } | ForEach-Object { $s = (Get-ChildItem $_.FullName -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum); \"{0} | files={1} | MB={2:N1}\" -f $_.FullName, $s.Count, ($s.Sum/1MB) }; git status --short | Select-Object -First 10; git check-ignore build"},
-      "expect_windows": {"decision": null, "reason": null, "message": null},
+      "expect_windows": {
+        "decision": "ask",
+        "reason": "[OLP] before engine check · no receipt",
+        "message": [
+          "OLP hook: check before it runs — before engine check · no receipt",
+          "Not classified yet for this project, so it is treated as a write."
+        ]
+      },
       "expect": {
         "decision": "ask",
         "reason": "[OLP] before engine check · no receipt",
@@ -248,10 +283,7 @@
         "message": [
           "OLP hook: check before it runs — before engine check · no receipt",
           "Not classified yet for this project, so it is treated as a write.",
-          "Not recognized: UsingStatement",
-          "Classify it once in your own terminal (not through the agent), then run it again:",
-          "  olp-hook classify --bash \"using module\" read_only",
-          "  (if it writes: writes_other or moves_money, add --reversible --recovery-declared only if true)"
+          "Not recognized: UsingStatement"
         ]
       },
       "expect": {
@@ -259,10 +291,7 @@
         "reason": "[OLP] before engine check · no receipt",
         "message": [
           "OLP hook: check before it runs — before engine check · no receipt",
-          "Not classified yet for this project, so it is treated as a write.",
-          "Classify it once in your own terminal (not through the agent), then run it again:",
-          "  olp-hook classify --bash \"using module\" read_only",
-          "  (if it writes: writes_other or moves_money, add --reversible --recovery-declared only if true)"
+          "Not classified yet for this project, so it is treated as a write."
         ]
       }
     },

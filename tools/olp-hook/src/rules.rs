@@ -13,8 +13,24 @@ use std::path::Path;
 const SHOW: usize = 5;
 
 /// Suffix appended after the prefix: does any command the rule accepts contain a risky pattern?
-const BASH_TAILS: [&str; 4] = ["x", "--force x", "push --force origin x", "reset --hard"];
-const PS_TAILS: [&str; 2] = ["x", "-Recurse -Force x"];
+const BASH_TAILS: [&str; 5] = ["x", "--force x", "push --force origin x", "reset --hard", "x /MIR"];
+const PS_TAILS: [&str; 4] = ["x", "-Recurse -Force x", "x /MIR", "Delete"];
+/// Prefix first words that always run any command, plus `Clear-Item` (erases content): counted for the install-end line only; the hook still treats them as unknown commands.
+const RUNS_ANY_OR_ERASES: &[&str] = &["iex", "invoke-expression", "invoke-command", "clear-item"];
+/// Shells that run any command only as a bare name or with a command-string flag (`pwsh -File x.ps1`, `& 'x.ps1'` run one fixed file and stay as before).
+const SHELLS: &[&str] = &["pwsh", "powershell", "&", "sh", "bash", "zsh", "dash", "cmd"];
+const COMMAND_FLAGS: &[&str] = &["-c", "-command", "-encodedcommand", "/c", "/k"];
+
+/// Does the rule prefix run any command (see the two lists above)?
+fn runs_any(prefix: &str) -> bool {
+    let mut w = prefix.split_whitespace();
+    // Only the first word is a program name (path and .exe stripped); `/c` is a flag, not a path.
+    match w.next().map(crate::shell::base) {
+        Some(first) if RUNS_ANY_OR_ERASES.contains(&first.as_str()) => true,
+        Some(first) if SHELLS.contains(&first.as_str()) => w.next().is_none_or(|second| COMMAND_FLAGS.contains(&second.to_lowercase().as_str())),
+        _ => false,
+    }
+}
 
 /// Is this a broad "always allow" rule (see module docs)?
 pub fn broad(rule: &str) -> bool {
@@ -38,6 +54,9 @@ pub fn broad(rule: &str) -> bool {
     }
     let prefix = inner.trim_end_matches('*').trim_end_matches(':').trim();
     if prefix.is_empty() {
+        return true;
+    }
+    if runs_any(prefix) {
         return true;
     }
     let shell = if r.starts_with("Bash(") { "Bash" } else { "PowerShell" };

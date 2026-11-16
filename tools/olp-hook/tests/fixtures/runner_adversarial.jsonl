@@ -1,0 +1,191 @@
+{"id":"r01","shell":"bash","cwd":".","input":"npx @feedpia/olp stats","stored":[],"key":"unnamed","card_never":[],"guard":"ask","from":"second review U3a, rc4 B RECHECK 3 (design 1-9 2-4b)"}
+{"id":"r02","shell":"bash","cwd":".","input":"npx -y cowsay","stored":["npx"],"key":"npx cowsay","card_never":[],"guard":"none","from":"rc4 1"}
+{"id":"r03","shell":"bash","cwd":".","input":"npx cowsay@npm:other","stored":["npx cowsay"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 B blocking 1"}
+{"id":"r04","shell":"bash","cwd":".","input":"npx cowsay@file:../x","stored":["npx cowsay"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 B blocking 1"}
+{"id":"r05","shell":"bash","cwd":".","input":"npx cowsay@github:u/r","stored":["npx cowsay"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 B blocking 1"}
+{"id":"r06","shell":"bash","cwd":".","input":"npx cowsay@1.2.3","stored":[],"key":"unnamed","card_never":[],"guard":"none","from":"design 1-20: @ is outside the allowed characters, so no remembered answer · rc4 2-2 3"}
+{"id":"r07","shell":"bash","cwd":".","input":"npm --yes exec cowsay","stored":["npm"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 B blocking 2a"}
+{"id":"r08","shell":"bash","cwd":".","input":"pnpm --silent dlx x","stored":["pnpm"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 B blocking 2a"}
+{"id":"r09","shell":"bash","cwd":".","input":"yarn --cwd a dlx x","stored":["yarn"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 B blocking 2a"}
+{"id":"r10","shell":"bash","cwd":".","input":"npx.cmd @a/b","stored":["npx.cmd"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 B blocking 2b · design 1-20: @ is outside the allowed characters"}
+{"id":"r11","shell":"bash","cwd":".","input":"npx.ps1 cowsay","stored":["npx.ps1"],"key":"npx cowsay","card_never":[],"guard":"none","from":"rc4 B blocking 2b"}
+{"id":"r12","shell":"bash","cwd":".","input":"pnpm.cmd dlx x","stored":["pnpm.cmd dlx"],"key":"pnpm dlx x","card_never":[],"guard":"none","from":"rc4 B blocking 2b"}
+{"id":"r13","shell":"bash","cwd":".","input":"npx --package=a b","stored":["npx"],"key":"unnamed","card_never":[],"guard":"none","from":"B non-blocking 3"}
+{"id":"r14","shell":"bash","cwd":".","input":"npx -yp a b","stored":["npx"],"key":"unnamed","card_never":[],"guard":"none","from":"B non-blocking 3"}
+{"id":"r15","shell":"bash","cwd":".","input":"npx -p a b","stored":["npx"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 3"}
+{"id":"r16","shell":"bash","cwd":".","input":"npx ./x","stored":["npx"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 3"}
+{"id":"r17","shell":"bash","cwd":".","input":"npx $P","stored":["npx"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 3"}
+{"id":"r18","shell":"bash","cwd":".","input":"npx","stored":["npx"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 3"}
+{"id":"r19","shell":"bash","cwd":".","input":"pnpm exec eslint .","stored":["pnpm exec"],"key":"pnpm exec eslint","card_never":[],"guard":"none","from":"DETECT1 B blocking 1"}
+{"id":"r20","shell":"bash","cwd":".","input":"yarn exec tsc","stored":["yarn exec"],"key":"yarn exec tsc","card_never":[],"guard":"none","from":"DETECT1 B blocking 1"}
+{"id":"r21","shell":"bash","cwd":".","input":"npm run build","stored":[],"key":"same","card_never":[],"guard":"none","from":"existing test, B blocking 1"}
+{"id":"r22","shell":"bash","cwd":".","input":"npm install left-pad","stored":[],"key":"same","card_never":[],"guard":"none","from":"existing test, B blocking 1"}
+{"id":"r23","shell":"bash","cwd":".","input":"bun test","stored":[],"key":"same","card_never":[],"guard":"none","from":"existing test, B blocking 1"}
+{"id":"r24","shell":"bash","cwd":".","input":"bun run build","stored":[],"key":"same","card_never":[],"guard":"none","from":"bun order 3"}
+{"id":"r25","shell":"bash","cwd":".","input":"bun x cowsay","stored":["bun x"],"key":"bun x cowsay","card_never":[],"guard":"none","from":"bun order 1"}
+{"id":"r26","shell":"bash","cwd":".","input":"bun run scripts/a.ts","stored":["bun run"],"key":"bun run scripts/a.ts","card_never":[],"guard":"none","from":"bun order 2"}
+{"id":"r27","shell":"bash","cwd":".","input":"bun scripts/a.ts","stored":["bun"],"key":"bun scripts/a.ts","card_never":[],"guard":"none","from":"bun order 2"}
+{"id":"r28","shell":"bash","cwd":".","input":"bun","stored":["bun"],"key":"unnamed","card_never":[],"guard":"none","from":"bun order 4, rc4 B RECHECK 1"}
+{"id":"r29","shell":"bash","cwd":".","input":"yarn","stored":["yarn"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 B RECHECK 1 non-blocking 1"}
+{"id":"r30","shell":"bash","cwd":".","input":"cargo test --release","stored":[],"key":"same","card_never":[],"guard":"none","from":"existing test"}
+{"id":"r31","shell":"bash","cwd":".","input":"7z a x.zip","stored":[],"key":"same","card_never":[],"guard":"none","from":"existing test"}
+{"id":"r32","shell":"bash","cwd":".","input":"npx @feedpia/olp classify --bash x read_only","stored":["npx @feedpia/olp"],"key":"unnamed","card_never":[],"guard":"block","from":"rc4 B RECHECK 3 non-blocking (DETECT1 2-3)"}
+{"id":"r33","shell":"bash","cwd":".","input":"npx olp stats","stored":["npx olp"],"key":"unnamed","card_never":[],"guard":"ask","from":"rc4 B RECHECK 3 non-blocking (DETECT1 2-3)"}
+{"id":"g01","shell":"bash","cwd":".","input":"if true; then npx @feedpia/olp choose 0123456789ab 1; fi","stored":["npx"],"key":"skip","card_never":[],"guard":"block","from":"second review U3a"}
+{"id":"g02","shell":"bash","cwd":".","input":"{ npx @feedpia/olp choose 0123456789ab 1; }","stored":["npx"],"key":"skip","card_never":[],"guard":"block","from":"second review U3a"}
+{"id":"g03","shell":"bash","cwd":".","input":"! npx olp screen on","stored":["npx olp"],"key":"skip","card_never":[],"guard":"block","from":"second review U3a"}
+{"id":"g04","shell":"bash","cwd":".","input":"npx -c 'olp choose 0123456789ab 1'","stored":["npx"],"key":"unnamed","card_never":[],"guard":"block","from":"second review U3a"}
+{"id":"g05","shell":"bash","cwd":".","input":"yarn olp screen on","stored":["yarn olp"],"key":"skip","card_never":[],"guard":"block","from":"second review U3a"}
+{"id":"g06","shell":"bash","cwd":".","input":"npm --yes exec olp screen on","stored":["npm"],"key":"unnamed","card_never":[],"guard":"block","from":"B RECHECK 1 U3a"}
+{"id":"g07","shell":"bash","cwd":".","input":"pnpm --silent dlx olp screen on","stored":["pnpm"],"key":"unnamed","card_never":[],"guard":"block","from":"B RECHECK 1 U3a"}
+{"id":"g08","shell":"bash","cwd":".","input":"yarn --cwd a olp screen on","stored":["yarn"],"key":"unnamed","card_never":[],"guard":"block","from":"B RECHECK 1 U3a"}
+{"id":"g09","shell":"bash","cwd":".","input":"npx -p some-other-pkg olp screen on","stored":["npx"],"key":"unnamed","card_never":[],"guard":"block","from":"B RECHECK 1 U3a"}
+{"id":"g10","shell":"bash","cwd":".","input":"pnpm dlx -p x olp screen on","stored":["pnpm dlx"],"key":"unnamed","card_never":[],"guard":"block","from":"B RECHECK 1 U3a"}
+{"id":"g11","shell":"bash","cwd":".","input":"npm exec -c 'olp screen on'","stored":["npm exec"],"key":"unnamed","card_never":[],"guard":"block","from":"B RECHECK 1 U3a"}
+{"id":"g12","shell":"bash","cwd":".","input":"pnpm exec -c 'olp screen on'","stored":["pnpm exec"],"key":"unnamed","card_never":[],"guard":"block","from":"DETECT1 B blocking 2"}
+{"id":"g13","shell":"bash","cwd":".","input":"npx -yc 'olp screen on'","stored":["npx"],"key":"unnamed","card_never":[],"guard":"block","from":"DETECT1 B blocking 2"}
+{"id":"g14","shell":"bash","cwd":".","input":"npx --cal 'ls; olp screen on'","stored":["npx"],"key":"unnamed","card_never":[],"guard":"block","from":"DETECT1 B blocking 2 (abbreviation)"}
+{"id":"g15","shell":"bash","cwd":".","input":"npx.cmd olp screen on","stored":["npx.cmd"],"key":"skip","card_never":[],"guard":"block","from":"B RECHECK 1 U3a"}
+{"id":"g16","shell":"bash","cwd":".","input":"pnpm.cmd exec olp choose 0123456789ab 1","stored":["pnpm.cmd exec"],"key":"skip","card_never":[],"guard":"block","from":"B RECHECK 1 U3a"}
+{"id":"g17","shell":"bash","cwd":".","input":"npx.ps1 -y olp screen on","stored":["npx"],"key":"skip","card_never":[],"guard":"block","from":"B RECHECK 1 U3a"}
+{"id":"g18","shell":"bash","cwd":".","input":"npx -p x olp stats","stored":["npx"],"key":"unnamed","card_never":[],"guard":"ask","from":"B RECHECK 1 U3a (read control)"}
+{"id":"g19","shell":"bash","cwd":".","input":"npx olp.bat screen on","stored":["npx"],"key":"skip","card_never":[],"guard":"block","from":"DETECT1 B blocking 4"}
+{"id":"g20","shell":"bash","cwd":".","input":"nodejs node_modules/olp/bin/olp.js choose 0123456789ab 1","stored":["nodejs"],"key":"skip","card_never":[],"guard":"block","from":"DETECT1 B blocking 4"}
+{"id":"g21","shell":"bash","cwd":".","input":"pnpm exec node_modules/.bin/olp-hook.exe classify --bash x read_only","stored":["pnpm exec"],"key":"skip","card_never":[],"guard":"block","from":"DETECT1 B blocking 4"}
+{"id":"g22","shell":"bash","cwd":".","input":"node node_modules/@feedpia/olp/bin/olp screen on","stored":["node"],"key":"skip","card_never":[],"guard":"block","from":"second review U3a RECHECK 1"}
+{"id":"g23","shell":"bash","cwd":".","input":"node -r ts-node/register ./node_modules/olp/bin/olp.js choose 0123456789ab 1","stored":["node"],"key":"unnamed","card_never":[],"guard":"block","from":"second review U3a RECHECK 1"}
+{"id":"g24","shell":"powershell","cwd":".","input":"if ($true) { olp screen on }","stored":[],"key":"same","card_never":[],"guard":"block","from":"second review U3a"}
+{"id":"g25","shell":"bash","cwd":".","input":"if true; then olp screen on; fi","stored":[],"key":"same","card_never":[],"guard":"block","from":"second review U3a"}
+{"id":"g26","shell":"bash","cwd":".","input":"bash -c 'olp screen on'","stored":["bash"],"key":"unnamed","card_never":[],"guard":"block","from":"DETECT1 2 rule 8"}
+{"id":"i01","shell":"bash","cwd":".","input":"node ./scripts/check.js","stored":[],"key":"node scripts/check.js","card_never":[],"guard":"none","from":"rc4 2-1c"}
+{"id":"i02","shell":"bash","cwd":".","input":"node ./scripts/wipe.js","stored":["node"],"key":"node scripts/wipe.js","card_never":[],"guard":"none","from":"engine1 measured gap"}
+{"id":"i03","shell":"bash","cwd":".","input":"node scripts/wipe.js","stored":["node scripts/check.js"],"key":"node scripts/wipe.js","card_never":[],"guard":"none","from":"engine1 measured gap"}
+{"id":"i04","shell":"powershell","cwd":".","input":"node.exe scripts\\check.js","stored":[],"key":"node scripts/check.js","card_never":[],"guard":"none","from":"rc4 2-1c 3 (powershell: in bash an unquoted backslash escapes the next letter)"}
+{"id":"i05","shell":"powershell","cwd":".","input":"node .\\x.js","stored":[],"key":"node x.js","card_never":[],"guard":"none","from":"DETECT1 B blocking 3 (powershell: same reason as i04)"}
+{"id":"i06","shell":"bash","cwd":".","input":"Node Scripts/Check.js","stored":["node scripts/check.js"],"key":"node Scripts/Check.js","card_never":[],"guard":"none","from":"DETECT1 B blocking 3 (case = another key)"}
+{"id":"i07","shell":"bash","cwd":".","input":"node ~/x.js","stored":["node"],"key":"unnamed","card_never":[],"guard":"none","from":"DETECT1 B blocking 3"}
+{"id":"i08","shell":"bash","cwd":".","input":"node C:/x/a.js","stored":["node"],"key":"unnamed","card_never":[],"guard":"none","from":"DETECT1 B blocking 3"}
+{"id":"i09","shell":"bash","cwd":".","input":"node sub/../../out.js","stored":["node"],"key":"unnamed","card_never":[],"guard":"none","from":"DETECT1 B blocking 3"}
+{"id":"i10","shell":"bash","cwd":".","input":"node /abs/x.js","stored":["node"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 2-1c 2"}
+{"id":"i11","shell":"bash","cwd":".","input":"node \\\\srv\\x.js","stored":["node"],"key":"unnamed","card_never":[],"guard":"none","from":"DETECT1 B blocking 3"}
+{"id":"i12","shell":"bash","cwd":".","input":"node $P","stored":["node"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 2-1c 2"}
+{"id":"i13","shell":"bash","cwd":".","input":"node *.js","stored":["node"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 2-1c 2"}
+{"id":"i14","shell":"bash","cwd":".","input":"cd x; node a.js","stored":["node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"DETECT1 B blocking 3"}
+{"id":"i15","shell":"powershell","cwd":".","input":"Set-Location x; node a.js","stored":["node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"DETECT1 B blocking 3"}
+{"id":"i16","shell":"bash","cwd":"sub","input":"node a.js","stored":["node a.js"],"key":"node sub/a.js","card_never":[],"guard":"none","from":"rc4 2-1c 4 (root based)"}
+{"id":"i17","shell":"bash","cwd":".","input":"node -e \"x\"","stored":["node"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 2-1c 5"}
+{"id":"i18","shell":"bash","cwd":".","input":"node --no-warnings x.js","stored":["node"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 2-1c 5"}
+{"id":"i19","shell":"bash","cwd":".","input":"node","stored":["node"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 2-1c 5"}
+{"id":"i20","shell":"bash","cwd":".","input":"python -c \"x\"","stored":["python"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 2-1c 5"}
+{"id":"i21","shell":"bash","cwd":".","input":"python -m pytest","stored":["python"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 2-1c 5"}
+{"id":"i22","shell":"bash","cwd":".","input":"python -","stored":["python"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 2-1c 5"}
+{"id":"i23","shell":"bash","cwd":".","input":"bash -c 'x'","stored":["bash"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 2-1c 5"}
+{"id":"i24","shell":"bash","cwd":".","input":"pwsh -File x.ps1","stored":["pwsh"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 2-1c 5"}
+{"id":"i25","shell":"bash","cwd":".","input":"cmd /c del x","stored":["cmd"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 2-1c 5"}
+{"id":"i26","shell":"bash","cwd":".","input":"nodejs a.js","stored":["nodejs"],"key":"nodejs a.js","card_never":[],"guard":"none","from":"DETECT1 B blocking 3 (list)"}
+{"id":"i27","shell":"bash","cwd":".","input":"deno a.ts","stored":["deno"],"key":"deno a.ts","card_never":[],"guard":"none","from":"DETECT1 B blocking 3 (list)"}
+{"id":"i28","shell":"bash","cwd":".","input":"tsx a.ts","stored":["tsx"],"key":"tsx a.ts","card_never":[],"guard":"none","from":"DETECT1 B blocking 3 (list)"}
+{"id":"i29","shell":"bash","cwd":".","input":"ts-node a.ts","stored":["ts-node"],"key":"ts-node a.ts","card_never":[],"guard":"none","from":"DETECT1 B blocking 3 (list)"}
+{"id":"i30","shell":"bash","cwd":".","input":"python a.py","stored":["python"],"key":"python a.py","card_never":[],"guard":"none","from":"DETECT1 B blocking 3 (list)"}
+{"id":"i31","shell":"bash","cwd":".","input":"python3 a.py","stored":["python3"],"key":"python3 a.py","card_never":[],"guard":"none","from":"DETECT1 B blocking 3 (list)"}
+{"id":"i32","shell":"bash","cwd":".","input":"python3.12 a.py","stored":["python3.12"],"key":"python3.12 a.py","card_never":[],"guard":"none","from":"DETECT1 B blocking 3 (list)"}
+{"id":"i33","shell":"bash","cwd":".","input":"py a.py","stored":["py"],"key":"py a.py","card_never":[],"guard":"none","from":"DETECT1 B blocking 3 (list)"}
+{"id":"i34","shell":"bash","cwd":".","input":"ruby a.rb","stored":["ruby"],"key":"ruby a.rb","card_never":[],"guard":"none","from":"DETECT1 B blocking 3 (list)"}
+{"id":"i35","shell":"bash","cwd":".","input":"perl a.pl","stored":["perl"],"key":"perl a.pl","card_never":[],"guard":"none","from":"DETECT1 B blocking 3 (list)"}
+{"id":"i36","shell":"bash","cwd":".","input":"php a.php","stored":["php"],"key":"php a.php","card_never":[],"guard":"none","from":"DETECT1 B blocking 3 (list)"}
+{"id":"i37","shell":"bash","cwd":".","input":"bash a.sh","stored":["bash"],"key":"bash a.sh","card_never":[],"guard":"none","from":"DETECT1 B blocking 3 (list)"}
+{"id":"i38","shell":"bash","cwd":".","input":"sh a.sh","stored":["sh"],"key":"sh a.sh","card_never":[],"guard":"none","from":"DETECT1 B blocking 3 (list)"}
+{"id":"i39","shell":"bash","cwd":".","input":"zsh a.sh","stored":["zsh"],"key":"zsh a.sh","card_never":[],"guard":"none","from":"DETECT1 B blocking 3 (list)"}
+{"id":"i40","shell":"bash","cwd":".","input":"dash a.sh","stored":["dash"],"key":"dash a.sh","card_never":[],"guard":"none","from":"DETECT1 B blocking 3 (list)"}
+{"id":"i41","shell":"bash","cwd":".","input":"pwsh a.ps1","stored":["pwsh"],"key":"pwsh a.ps1","card_never":[],"guard":"none","from":"DETECT1 B blocking 3 (list)"}
+{"id":"i42","shell":"bash","cwd":".","input":"powershell a.ps1","stored":["powershell"],"key":"powershell a.ps1","card_never":[],"guard":"none","from":"DETECT1 B blocking 3 (list)"}
+{"id":"i43","shell":"bash","cwd":".","input":"node a.js","stored":["node"],"key":"node a.js","card_never":[],"guard":"none","from":"DETECT1 B blocking 3 (list)"}
+{"id":"i44","shell":"bash","cwd":".","input":"bun a.ts","stored":["bun"],"key":"bun a.ts","card_never":[],"guard":"none","from":"DETECT1 B blocking 3 (list)"}
+{"id":"i45","shell":"bash","cwd":".","input":"deno run scripts/a.ts","stored":["deno run"],"key":"deno run scripts/a.ts","card_never":[],"guard":"none","from":"rc4 2-1c 6"}
+{"id":"i46","shell":"bash","cwd":".","input":"deno test","stored":[],"key":"same","card_never":[],"guard":"none","from":"rc4 2-1c 6"}
+{"id":"i47","shell":"bash","cwd":".","input":"(cd x; node a.js)","stored":["node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 B RECHECK 2 blocking 1 (DETECT1 2-2)"}
+{"id":"i48","shell":"bash","cwd":".","input":"pushd x && node a.js","stored":["node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 B RECHECK 2 blocking 1"}
+{"id":"i49","shell":"bash","cwd":".","input":"popd; node a.js","stored":["node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 B RECHECK 2 blocking 1"}
+{"id":"i50","shell":"powershell","cwd":".","input":"sl x; node a.js","stored":["node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 B RECHECK 2 blocking 1"}
+{"id":"i51","shell":"bash","cwd":".","input":"env --chdir=x node a.js","stored":["node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 B RECHECK 2 blocking 1"}
+{"id":"i52","shell":"bash","cwd":".","input":"env -Cx node a.js","stored":["node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 B RECHECK 2 blocking 1"}
+{"id":"i53","shell":"bash","cwd":".","input":"bun ./test","stored":["bun test"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 B RECHECK 2 blocking 2 (DETECT1 2-2)"}
+{"id":"i54","shell":"bash","cwd":".","input":"deno ./test","stored":["deno test"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 B RECHECK 2 blocking 2"}
+{"id":"i55","shell":"powershell","cwd":".","input":"node \\x.js","stored":["node"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 B RECHECK 2 blocking 2 (leading / after normalizing)"}
+{"id":"i56","shell":"bash","cwd":".","input":"node server","stored":["node"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 B RECHECK 2 blocking 2 (no dot or slash = not a path)"}
+{"id":"i57","shell":"bash","cwd":".","input":"if cd sub; then node a.js; fi","stored":["node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 second review blocking 1 (design 1-10 2-4c note 1)"}
+{"id":"i58","shell":"bash","cwd":".","input":"{ cd sub; }; node a.js","stored":["node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 second review blocking 1 (design 1-10 2-4c note 1)"}
+{"id":"i59","shell":"bash","cwd":".","input":"! cd sub; node a.js","stored":["node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 second review blocking 1 (design 1-10 2-4c note 1)"}
+{"id":"i60","shell":"powershell","cwd":".","input":"cd..; node a.js","stored":["node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 second review blocking 1 (design 1-10 2-4c note 1)"}
+{"id":"r34","shell":"bash","cwd":".","input":"npx tsx a.ts","stored":["npx tsx"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 B RECHECK 2 / second review (design 1-10 2-4c)"}
+{"id":"r35","shell":"bash","cwd":".","input":"npx node a.js","stored":["npx node"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 B RECHECK 2 / second review (design 1-10 2-4c)"}
+{"id":"r36","shell":"bash","cwd":".","input":"pnpm exec node a.js","stored":["pnpm exec node"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 B RECHECK 2 / second review (design 1-10 2-4c)"}
+{"id":"r37","shell":"bash","cwd":".","input":"bunx ts-node a.ts","stored":["bunx ts-node"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 B RECHECK 2 / second review (design 1-10 2-4c)"}
+{"id":"r38","shell":"bash","cwd":".","input":"yarn tsx a.ts","stored":["yarn tsx"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 B RECHECK 2 / second review (design 1-10 2-4c)"}
+{"id":"r39","shell":"bash","cwd":".","input":"bun tsx a.ts","stored":["bun tsx"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 B RECHECK 2 / second review (design 1-10 2-4c)"}
+{"id":"r40","shell":"bash","cwd":".","input":"npx tsx.cmd a.ts","stored":["npx tsx.cmd"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 B RECHECK 2 / second review (design 1-10 2-4c)"}
+{"id":"r41","shell":"bash","cwd":".","input":"pnpm exec node.exe a.js","stored":["pnpm exec node.exe"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 B RECHECK 2 / second review (design 1-10 2-4c)"}
+{"id":"r42","shell":"bash","cwd":".","input":"npx pnpm install","stored":["npx pnpm"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 B RECHECK 2 / second review (design 1-10 2-4c)"}
+{"id":"r43","shell":"bash","cwd":".","input":"corepack pnpm dlx cowsay","stored":["corepack pnpm"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 B RECHECK 2 / second review (design 1-10 2-4c)"}
+{"id":"r44","shell":"bash","cwd":".","input":"xargs node a.js","stored":["xargs node"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 B RECHECK 2 / second review (design 1-10 2-4c)"}
+{"id":"r45","shell":"bash","cwd":"sub","input":"bun x cowsay hello","stored":[],"key":"bun x cowsay","card_never":[],"guard":"none","from":"rc4 B RECHECK 2 / second review (design 1-10 2-4c)"}
+{"id":"i61","shell":"bash","cwd":".","input":"env -C x node a.js","stored":["x node","node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 B RECHECK 2 / second review (design 1-10 2-4c)"}
+{"id":"i62","shell":"bash","cwd":".","input":"env --chdir x node a.js","stored":["x node","node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 B RECHECK 2 / second review (design 1-10 2-4c)"}
+{"id":"i63","shell":"bash","cwd":".","input":"sudo -D x node a.js","stored":["x node","node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 B RECHECK 2 / second review (design 1-10 2-4c)"}
+{"id":"i64","shell":"bash","cwd":".","input":"sudo -u bob node a.js","stored":["bob node","node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 B RECHECK 2 / second review (design 1-10 2-4c)"}
+{"id":"i65","shell":"bash","cwd":".","input":"env -u VAR node a.js","stored":["var node","node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 B RECHECK 2 / second review (design 1-10 2-4c)"}
+{"id":"i66","shell":"bash","cwd":".","input":"{ cd sub; node a.js; }","stored":["node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 B RECHECK 2 / second review (design 1-10 2-4c)"}
+{"id":"i67","shell":"bash","cwd":".","input":"while cd sub; do node a.js; done","stored":["node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 B RECHECK 2 / second review (design 1-10 2-4c)"}
+{"id":"i68","shell":"bash","cwd":".","input":"! env -Cx node a.js","stored":["node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 B RECHECK 2 / second review (design 1-10 2-4c)"}
+{"id":"i69","shell":"bash","cwd":".","input":"if true; then env --chdir=x node a.js; fi","stored":["node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 B RECHECK 2 / second review (design 1-10 2-4c)"}
+{"id":"i70","shell":"powershell","cwd":".","input":"cd~; node a.js","stored":["node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 B RECHECK 2 / second review (design 1-10 2-4c)"}
+{"id":"i71","shell":"powershell","cwd":".","input":"if ($x) { Set-Location sub }; node a.js","stored":["node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 B RECHECK 2 / second review (design 1-10 2-4c)"}
+{"id":"i72","shell":"bash","cwd":".","input":"env -vCx node a.js","stored":["node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 second review RECHECK 77f65c218 (design 1-11)"}
+{"id":"i73","shell":"bash","cwd":".","input":"env --ch=x node a.js","stored":["node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 second review RECHECK 77f65c218 (design 1-11)"}
+{"id":"i74","shell":"bash","cwd":".","input":"env --chd=x node a.js","stored":["node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 second review RECHECK 77f65c218 (design 1-11)"}
+{"id":"i75","shell":"bash","cwd":".","input":"sudo -nDx node a.js","stored":["node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 second review RECHECK 77f65c218 (design 1-11)"}
+{"id":"i76","shell":"bash","cwd":".","input":"NODE_OPTIONS=--require=./w.js node a.js","stored":["node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 second review RECHECK 77f65c218 (design 1-11)"}
+{"id":"i77","shell":"bash","cwd":".","input":"BASH_ENV=./w.sh bash a.sh","stored":["bash a.sh"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 second review RECHECK 77f65c218 (design 1-11)"}
+{"id":"i78","shell":"bash","cwd":".","input":"NODE_OPTIONS=--require=./w.js npx cowsay","stored":["npx cowsay"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 second review RECHECK 77f65c218 (design 1-11)"}
+{"id":"i79","shell":"bash","cwd":".","input":"PYTHONPATH=x python a.py","stored":["python a.py"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 second review RECHECK 77f65c218 (design 1-11)"}
+{"id":"i80","shell":"bash","cwd":".","input":"env NODE_OPTIONS=--require=./w.js node a.js","stored":["node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 second review RECHECK 77f65c218 (design 1-11)"}
+{"id":"i81","shell":"powershell","cwd":".","input":"cd\\; node a.js","stored":["node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 second review RECHECK 77f65c218 (design 1-11)"}
+{"id":"r46","shell":"bash","cwd":"sub","input":"bun x @feedpia/olp stats","stored":[],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 second review RECHECK 77f65c218 (design 1-11)"}
+{"id":"r47","shell":"bash","cwd":".","input":"NPX.CMD tsx a.ts","stored":["npx tsx"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 second review RECHECK 77f65c218 (design 1-11)"}
+{"id":"r48","shell":"bash","cwd":".","input":"npx @FEEDPIA/OLP@latest stats","stored":["npx @feedpia/olp"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 second review RECHECK 77f65c218 (design 1-11)"}
+{"id":"i82","shell":"bash","cwd":".","input":"sudo -nE node a.js","stored":["node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 design 1-11 2-4d closed grammar"}
+{"id":"i83","shell":"bash","cwd":".","input":"NODE_ENV=test node a.js","stored":["node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 design 1-11 2-4d closed grammar"}
+{"id":"i84","shell":"bash","cwd":".","input":"env FOO=1 node a.js","stored":["node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 design 1-11 2-4d closed grammar"}
+{"id":"i85","shell":"bash","cwd":".","input":"CI=1 npx cowsay","stored":["npx cowsay"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 design 1-11 2-4d closed grammar"}
+{"id":"i86","shell":"bash","cwd":".","input":"frobnicate node a.js","stored":["node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 design 1-11 2-4d closed grammar"}
+{"id":"i87","shell":"bash","cwd":".","input":"BASH_ENV=x bash s.sh","stored":["bash s.sh"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 design 1-11 2-4d closed grammar"}
+{"id":"i88","shell":"bash","cwd":".","input":"sudo -n node a.js","stored":[],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 design 1-11 2-4d closed grammar · rc4 rev 15 simple form only (wrapper → unnamed)"}
+{"id":"i89","shell":"bash","cwd":".","input":"env -i node a.js","stored":[],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 design 1-11 2-4d closed grammar · rc4 rev 15 simple form only (wrapper → unnamed)"}
+{"id":"i90","shell":"bash","cwd":".","input":"sudo node a.js","stored":[],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 design 1-11 2-4d closed grammar · rc4 rev 15 simple form only (wrapper → unnamed)"}
+{"id":"i91","shell":"bash","cwd":".","input":"export NODE_OPTIONS=--require=./w.js; node a.js","stored":["node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 design 1-12 2-4d 5 earlier command"}
+{"id":"i92","shell":"bash","cwd":".","input":"export NODE_OPTIONS=--require=./w.js && node a.js","stored":["node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 design 1-12 2-4d 5 earlier command"}
+{"id":"i93","shell":"bash","cwd":".","input":"NODE_OPTIONS=--require=./w.js; node a.js","stored":["node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 design 1-12 2-4d 5 earlier command"}
+{"id":"i94","shell":"bash","cwd":".","input":"declare -x X=1; node a.js","stored":["node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 design 1-12 2-4d 5 earlier command"}
+{"id":"i95","shell":"bash","cwd":".","input":"source ./e.sh && node a.js","stored":["node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 design 1-12 2-4d 5 earlier command"}
+{"id":"i96","shell":"bash","cwd":".","input":". ./env.sh; node a.js","stored":["node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 design 1-12 2-4d 5 earlier command"}
+{"id":"i97","shell":"powershell","cwd":".","input":"$env:NODE_OPTIONS='--require=./w.js'; node a.js","stored":["node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 design 1-12 2-4d 5 earlier command"}
+{"id":"i98","shell":"powershell","cwd":".","input":"Set-Item env:NODE_OPTIONS x; node a.js","stored":["node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 design 1-12 2-4d 5 earlier command"}
+{"id":"i99","shell":"bash","cwd":".","input":"cat x | node a.js","stored":["node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 design 1-12 2-4d 5 earlier command"}
+{"id":"i100","shell":"bash","cwd":".","input":"npm run build && node a.js","stored":["node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 design 1-12 2-4d 5 earlier command"}
+{"id":"i101","shell":"bash","cwd":".","input":"git status && node a.js","stored":[],"key":"unnamed","card_never":[],"guard":"none","from":"ledger 1321 ① bundle = no remembered answer · rc4 design 1-12 2-4d 5 earlier command"}
+{"id":"i102","shell":"bash","cwd":".","input":"echo hi; node a.js","stored":[],"key":"unnamed","card_never":[],"guard":"none","from":"ledger 1321 ① bundle = no remembered answer · rc4 design 1-12 2-4d 5 earlier command"}
+{"id":"i103","shell":"bash","cwd":".","input":"git -c x=y status && node a.js","stored":["node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 B PASS RECHECK 7 memo 1 (git -c) · card_never default (first word git + stored), second review RECHECK 3f5b6b3ef blocking 1"}
+{"id":"i104","shell":"powershell","cwd":".","input":"try { env -vCx node a.js } finally { }","stored":["node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 second review RECHECK 9a54918df blocking 2 (PowerShell groups)"}
+{"id":"i105","shell":"powershell","cwd":".","input":"try { npm run build } finally { node a.js }","stored":["npm run build","node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 second review RECHECK 9a54918df blocking 2 (PowerShell groups)"}
+{"id":"i106","shell":"powershell","cwd":".","input":"if ($true) { env -C x node a.js }","stored":["node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 second review RECHECK 9a54918df blocking 2 (PowerShell groups)"}
+{"id":"i107","shell":"bash","cwd":".","input":"git -C x push","stored":["git"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 second review RECHECK 3f5b6b3ef blocking 1 (one-word key from a flagged command: a stored git read answer must not pass it)"}
+{"id":"i108","shell":"bash","cwd":".","input":"git -C x status","stored":["git"],"key":"same","card_never":[],"guard":"none","from":"rc4 second review RECHECK 3f5b6b3ef blocking 1 · the git read rule skips -C x and reads git status as a read; no group key, no card"}
+{"id":"i109","shell":"bash","cwd":".","input":"node a.js $'\\'' ; python x.py ; echo \\'","stored":["node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 B RECHECK db23b532c blocking 1 ($'...' ANSI-C quote hides a bundle sign)"}
+{"id":"i110","shell":"bash","cwd":".","input":"node a.js \"${x#'\"'}\" ; python x.py ; echo \\'","stored":["node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 second review RECHECK 39e4549d9 blocking 1 (quote inside ${...} hides a bundle sign)"}
+{"id":"i111","shell":"powershell","cwd":".","input":"node a.js '’ ; python x.py ; echo ’'","stored":["node a.js"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 second review RECHECK 39e4549d9 blocking 2 (PowerShell curly quote closes a quote)"}
+{"id":"i112","shell":"powershell","cwd":".","input":"git ,push","stored":["git"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 second review RECHECK 21880f55a blocking 1 (PowerShell comma hides the subcommand)"}
+{"id":"i113","shell":"powershell","cwd":".","input":"git ,-C,x,push","stored":["git"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 second review RECHECK 21880f55a blocking 1 (PowerShell comma hides the subcommand)"}
+{"id":"i114","shell":"powershell","cwd":".","input":"mytool ,push","stored":["mytool"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 second review RECHECK 21880f55a blocking 1 (PowerShell comma hides the subcommand)"}
+{"id":"i115","shell":"bash","cwd":".","input":"PATH=x/bin git","stored":["git"],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 second review RECHECK 21880f55a blocking 2 (leading NAME=value changes the program or its environment)"}
+{"id":"i116","shell":"bash","cwd":".","input":"GIT_EXTERNAL_DIFF=./w.sh git diff","stored":[],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 second review RECHECK 21880f55a blocking 2 (leading NAME=value changes the program or its environment)"}
+{"id":"i117","shell":"bash","cwd":".","input":"GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=./w.sh git status","stored":[],"key":"unnamed","card_never":[],"guard":"none","from":"rc4 second review RECHECK 21880f55a blocking 2 (leading NAME=value changes the program or its environment)"}

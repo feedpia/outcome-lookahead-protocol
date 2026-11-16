@@ -39,36 +39,14 @@ fn last_sent_day(p: &Path, h: &Path) -> Option<u64> {
     r["last_sent_day"].as_u64()
 }
 
-/// How long the same `signal --session-start` takes on this runner when there is no consent (it reads the record and starts
-/// nothing). Session start must not wait for curl or the server, so it may only cost a little more than this: a fixed 500 ms
-/// failed on busy CI runners where every process start was slow (ci-pr runs 42570263852 958 ms, 42572520278 581 ms).
-fn quiet_start(hook: &Path, path: Option<&std::ffi::OsStr>) -> Duration {
-    let (p, h) = tmp("quiet");
-    let mut c = Command::new(hook);
-    c.args(["signal", "--session-start"])
-        .env("CLAUDE_PROJECT_DIR", &p)
-        .env("HOME", &h)
-        .env("USERPROFILE", &h)
-        .env_remove("OLP_HOOK_SIGNAL")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    if let Some(v) = path {
-        c.env("PATH", v);
-    }
-    let t = Instant::now();
-    let o = c.output().unwrap();
-    let d = t.elapsed();
-    assert_eq!(o.status.code(), Some(0), "quiet start");
-    d
-}
+/// Session start must not wait for curl or the server (FLAKY_2026-11-14 form A: no time dependence on a one-shot reference).
+/// What it would wait for lasts at least 5 s (curl's own limit) or 20 s (the hanging fake curl), so «returned within 3 s» can only fail
+/// when it really waits; a slow process start on a busy runner (958 ms seen) stays far below it. The old rule «a quiet start measured once
+/// + 300 ms» failed on noise alone (ci-pr run 43498279986: 310 ms against a 1.4 ms reference).
+const NEVER_WAITS: Duration = Duration::from_secs(3);
 
-/// Session start costs at most 300 ms more than a quiet start on the same runner (starting curl), and never more than 2 s.
-fn assert_start_fast(elapsed: Duration, quiet: Duration) {
-    assert!(
-        elapsed <= quiet + Duration::from_millis(300) && elapsed <= Duration::from_secs(2),
-        "session start waited {elapsed:?} (quiet start on this runner {quiet:?})"
-    );
+fn assert_start_fast(elapsed: Duration) {
+    assert!(elapsed < NEVER_WAITS, "session start waited {elapsed:?} (limit {NEVER_WAITS:?}; what it could wait for lasts 5 s or more)");
 }
 
 /// Runs `olp-hook signal --session-start` and returns (elapsed, exit code, stdout, stderr).
@@ -118,9 +96,8 @@ fn start_returns_fast_when_server_never_answers() {
     let (p, h) = tmp("slow");
     let (port, rx) = silent_server();
     opt_in_to(&p, &h, &format!("https://127.0.0.1:{port}/v1/olp/signal"));
-    let quiet = quiet_start(Path::new(env!("CARGO_BIN_EXE_olp-hook")), None);
     let (elapsed, code, out, err) = session_start(&p, &h);
-    assert_start_fast(elapsed, quiet);
+    assert_start_fast(elapsed);
     assert_eq!(code, Some(0));
     assert!(out.is_empty() && err.is_empty(), "session start prints nothing");
     assert!(last_sent_day(&p, &h).is_some(), "the day is recorded before the attempt");
@@ -186,7 +163,6 @@ fn start_is_quiet_and_fast_when_curl_exits_at_once() {
     let (p, h) = tmp("fakecurl");
     opt_in_to(&p, &h, "https://127.0.0.1:9/v1/olp/signal");
     let (hook, path) = with_fake_curl(&p.parent().unwrap().join("fakebin"));
-    let quiet = quiet_start(&hook, Some(&path));
     let t = Instant::now();
     let o = Command::new(&hook)
         .args(["signal", "--session-start"])
@@ -203,7 +179,7 @@ fn start_is_quiet_and_fast_when_curl_exits_at_once() {
     let elapsed = t.elapsed();
     assert_eq!(o.status.code(), Some(0));
     assert!(o.stdout.is_empty() && o.stderr.is_empty(), "session start prints nothing: {:?} {:?}", o.stdout, o.stderr);
-    assert_start_fast(elapsed, quiet);
+    assert_start_fast(elapsed);
     assert!(last_sent_day(&p, &h).is_some(), "the day is recorded before the attempt");
 }
 
@@ -211,10 +187,42 @@ fn start_is_quiet_and_fast_when_curl_exits_at_once() {
 fn start_returns_fast_when_port_is_closed() {
     let (p, h) = tmp("closed");
     opt_in_to(&p, &h, "https://127.0.0.1:9/v1/olp/signal");
-    let quiet = quiet_start(Path::new(env!("CARGO_BIN_EXE_olp-hook")), None);
     let (elapsed, code, out, err) = session_start(&p, &h);
-    assert_start_fast(elapsed, quiet);
+    assert_start_fast(elapsed);
     assert_eq!(code, Some(0));
     assert!(out.is_empty() && err.is_empty());
     assert!(last_sent_day(&p, &h).is_some());
+}
+
+/// A `curl` that hangs for 20 s: if session start waited for it, the start would take 20 s.
+#[cfg(unix)]
+#[test]
+fn start_does_not_wait_for_a_hanging_curl() {
+    use std::os::unix::fs::PermissionsExt;
+    let (p, h) = tmp("hangcurl");
+    opt_in_to(&p, &h, "https://127.0.0.1:9/v1/olp/signal");
+    let dir = p.parent().unwrap().join("hangbin");
+    fs::create_dir_all(&dir).unwrap();
+    let curl = dir.join("curl");
+    fs::write(&curl, "#!/bin/sh\nsleep 20\n").unwrap();
+    fs::set_permissions(&curl, fs::Permissions::from_mode(0o755)).unwrap();
+    let mut path = std::ffi::OsString::from(dir.as_os_str());
+    path.push(":");
+    path.push(std::env::var_os("PATH").unwrap_or_default());
+    let t = Instant::now();
+    let o = Command::new(env!("CARGO_BIN_EXE_olp-hook"))
+        .args(["signal", "--session-start"])
+        .env("CLAUDE_PROJECT_DIR", &p)
+        .env("HOME", &h)
+        .env("USERPROFILE", &h)
+        .env("PATH", path)
+        .env_remove("OLP_HOOK_SIGNAL")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .unwrap();
+    assert_start_fast(t.elapsed());
+    assert_eq!(o.status.code(), Some(0));
+    assert!(o.stdout.is_empty() && o.stderr.is_empty());
 }

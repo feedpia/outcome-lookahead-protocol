@@ -17,6 +17,8 @@ fn tmp(name: &str) -> PathBuf {
         fs::remove_dir_all(&p).unwrap();
     }
     fs::create_dir_all(&p).unwrap();
+    // rev 17-3: answers and config live in the user's trust folder for this project path; drop leftovers from an earlier run
+    let _ = fs::remove_dir_all(olp_hook::store::trust_dir(&p));
     p
 }
 
@@ -42,7 +44,8 @@ fn setup(p: &Path, case: &Value) {
     }
     fs::create_dir_all(p.join(".olp")).unwrap();
     let pick = case["pick"].as_bool().unwrap_or(false);
-    fs::write(p.join(".olp/hook-config.json"), json!({"counter_timeout_ms": 3000, "hook_budget_ms": 8000, "pick": pick}).to_string()).unwrap();
+    fs::create_dir_all(olp_hook::store::trust_dir(p)).unwrap();
+    fs::write(olp_hook::config::path(p), json!({"counter_timeout_ms": 3000, "hook_budget_ms": 8000, "pick": pick}).to_string()).unwrap();
     if case["gui_alive"].as_bool().unwrap_or(false) {
         fs::write(p.join(".olp/gui.alive"), json!({"v": 1, "port": 1}).to_string()).unwrap();
     }

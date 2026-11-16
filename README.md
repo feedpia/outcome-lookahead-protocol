@@ -52,11 +52,12 @@ npx @feedpia/olp install
 - At the end it shows one summary: the entries it added, what OLP does, how many of your 'always allow' permission rules (user, project and local settings) cover commands that can delete or overwrite, and how to undo it. It only reads those rules; it does not change them.
 - `--dry-run` shows what would change without changing anything. `--user` uses your user settings (`~/.claude/settings.json`) instead. `--replace` points an existing `olp-hook` entry at the new copy.
 - Run in your home folder without `--user`, install changes nothing and stops: the settings file there applies to every project. Run it inside a project folder, or add `--user` if you want that.
-- `{"decision": true}` in `.olp/hook-config.json` (experimental, off by default): when a delete covers 2 or more files and some of them are not in git, the hook stops it once and gives the agent three options to ask you about (cancel first, then keep some, then delete all). Your choice is the agent's next instruction; the next delete shows the usual card and permission prompt.
+- `{"decision": true}` in your settings for this project, `~/.olp/projects/<key>/hook-config.json` (see "What is stored on this device"; experimental, off by default): when a delete covers 2 or more files and some of them are not in git, the hook stops it once and gives the agent three options to ask you about (cancel first, then keep some, then delete all). Your choice is the agent's next instruction; the next delete shows the usual card and permission prompt.
 - Update: re-run the install command (`npx @feedpia/olp install`). Version 0.1.2 has no self-update.
-- Undo: `npx @feedpia/olp uninstall` removes the `olp-hook` entries from your Claude Code settings file. It rewrites the whole file in standard JSON formatting, so spacing and line breaks may change, and empty hook lists created during install (such as `"PostToolUse": []`) may be left behind. All other settings behave as before. The programs in `olp` are left; delete that folder if you no longer need them.
+- Undo: `npx @feedpia/olp uninstall` removes the `olp-hook` entries from your Claude Code settings file. It rewrites the whole file in standard JSON formatting, so spacing and line breaks may change, and removes the empty hook lists that install created. If install created the settings file and nothing else is left in it, uninstall deletes the file (a backup stays in `~/olp/backup/`). A file, list, or setting that was there before install stays. If you updated over 0.1.1 or 0.1.2, the empty lists those versions created can stay, and the settings file is never deleted as a whole. Install keeps its note of what it created in `.olp/install-created-settings.json` next to `.claude`; uninstall removes that note. All other settings behave as before. The programs in `olp` are left; delete that folder if you no longer need them.
 - The copy is checked byte for byte against the one in the package. That only shows the copy is intact; it does not show the package is ours. Check the release's `SHA256SUMS` for that.
 - Downloaded from Releases instead? Unpack `olp-hook-<os>-<arch>.zip`/`.tar.gz` somewhere outside your project (the program inside is `olp-hook`, `olp-hook.exe` on Windows — do not rename it). On macOS, a browser download is blocked as unsigned until you run `xattr -d com.apple.quarantine <path>/olp-hook`. Then, inside your project, run that file with `install`: `~/Downloads/olp-hook install` (Windows: `~\Downloads\olp-hook.exe install`). It copies itself to `~/olp/` and writes the full path into `.claude/settings.json`. If the program was renamed, install changes nothing and stops with a one-line reason.
+- Claude Code plugin instead of `npx`? The plugin's hook runs `olp-hook` from your PATH, and if it can't run, Claude Code blocks the call. Neither `npx @feedpia/olp install` nor an npm install puts `olp-hook` on your PATH, so with the plugin alone every shell and MCP call is blocked, and installing with `npx` while the plugin stays on does not change that. Turn the plugin off and use the `npx` install above, or add the `olp` folder in your home folder to PATH before you turn the plugin on.
 
 Builds: Windows x64, macOS (Apple silicon, Intel), Linux x64, Linux arm64. On other systems it stops and says there is no build yet.
 
@@ -170,7 +171,7 @@ olp-hook classify --bash "psql" writes_other --db-count 42
 
 ## Counting (device only)
 
-Counting is on by default with the bundled limits (`data/hook-config.default.json`: counter 3000 ms, hook 5000 ms). To change them, set them in `.olp/hook-config.json`; a field you leave out keeps the bundled value. If counting runs past its limit, the card says "count not checked".
+Counting is on by default with the bundled limits (`data/hook-config.default.json`: counter 3000 ms, hook 5000 ms). To change them, set them in your settings for this project, `~/.olp/projects/<key>/hook-config.json` (see "What is stored on this device"); a field you leave out keeps the bundled value. If counting runs past its limit, the card says "count not checked".
 
 ```json
 { "counter_timeout_ms": 3000, "hook_budget_ms": 5000 }
@@ -184,13 +185,17 @@ Changing folder: `cd <folder> && …` (Bash) is counted in that folder only when
 
 ## Quiet mode (per project, off by default)
 
-Add `"quiet": true` to `.olp/hook-config.json`. Then a write you classified as `writes_other --reversible --recovery-declared` passes without a card. The pass is still recorded. Risky forms and money moves still get a card.
+Add `"quiet": true` to your settings for this project, `~/.olp/projects/<key>/hook-config.json` in your home folder (a `.olp/hook-config.json` inside the project is ignored, so a cloned repository cannot turn quiet mode on). Then a write you classified as `writes_other --reversible --recovery-declared` passes without a card. The pass is still recorded. Risky forms and money moves still get a card.
 
 ## Your numbers: `olp-hook stats`
 
 Counts from this device only: first run time, decisions, stops (prompt or block), calls that ran after a card and calls that did not, quiet passes, classify answers. No paths, command text, or ids. Nothing is sent.
 
 In a terminal, `stats` first draws this week (the last 7 UTC days) for about a second: cards in the prompt, ran after a card, not run after a card, blocked, and the files on those cards that were counted on this device. "Not run" means the call did not report back as run. Use `olp-hook stats --plain` (or set `NO_COLOR`) for plain text only. If your console shows stray characters, use `--plain`.
+
+## Check your past commands: `olp-hook replay`
+
+Reads your local Claude Code records (`~/.claude/projects`), takes the recorded Bash and PowerShell commands, and judges each one with the same rules the hook uses: passed silently, would have asked, or would have been stopped by a rule. `--today` (last 24 hours), `--days N` (default 30), `--show N` (print up to N of the judged commands), `--json`. None of the recorded commands are run and nothing is sent. To judge, it may start PowerShell's parser and read-only git commands in the folder each command was run in. The only file it writes is a run count in `<home>/olp/replay-count.json`.
 
 ## Watch the card next to the prompt: `olp-hook watch`
 
@@ -218,18 +223,20 @@ If you say yes, your answer and a random id are stored outside the project, in `
 
 The counts cover what the hook recorded since the last send, up to 10 minutes before this send (so a decision card's 10 minutes are over before it is counted). Each count stops at 10000. No commands, paths, file or folder names, amounts or answer text are sent. The server does not store your IP address or the raw `install_id`. Server totals are by the day they were received; one daily send can cover several days since the last send.
 
-It is sent only to the `https://` address in the bundled settings file, with no redirects, your own curl config file ignored, and a 5-second limit. At session start the hook does not wait for it, so your session is never slowed down; when you run `olp-hook signal` yourself it waits and says what happened: sent, no answer in time — it may still have arrived — or not sent. A project's `.olp/hook-config.json` can only turn it off (`"signal_endpoint": ""`); it cannot change the address. A failed send is not retried that day, prints nothing and never changes what the hook decides. The hook itself (PreToolUse/PostToolUse) never sends it.
+It is sent only to the `https://` address in the bundled settings file, with no redirects, your own curl config file ignored, and a 5-second limit. At session start the hook does not wait for it, so your session is never slowed down; when you run `olp-hook signal` yourself it waits and says what happened: sent, no answer in time — it may still have arrived — or not sent. Your settings for a project (`~/.olp/projects/<key>/hook-config.json`) can only turn it off (`"signal_endpoint": ""`); it cannot change the address. A failed send is not retried that day, prints nothing and never changes what the hook decides. The hook itself (PreToolUse/PostToolUse) never sends it.
 
 Turn it off at any time with `npx @feedpia/olp telemetry off` (removes the `SessionStart` entry and your id). `OLP_HOOK_SIGNAL=off` also stops it and always wins.
 
 ## What is stored on this device
 
-- `.olp/hook-map.json`: your answers. For each `tool:<name>` or `bash:<first word + subcommand>` it keeps the effect, whether it can be undone, whether a recovery location was declared, the time, and any count you gave. No arguments, paths, or amounts.
+- `~/.olp/projects/<key>/hook-map.json` in your home folder (Windows `C:\Users\<you>\.olp\projects\<key>\`), where `<key>` is made from the project folder path, so each project folder has its own: your answers. For each `tool:<name>` or `bash:<first word + subcommand>` it keeps the effect, whether it can be undone, whether a recovery location was declared, the time, and any count you gave. No arguments, paths, or amounts.
+- `~/.olp/projects/<key>/hook-config.json`, next to it: your settings for this project (time limits, `quiet`, `decision`), if you write one.
+- These two are kept in your home folder, not inside the project, so a cloned repository cannot bring its own answers or turn on quiet mode. Files named `.olp/hook-map.json` or `.olp/hook-config.json` inside a project are ignored. Answers saved inside the project by 0.1.2 or earlier are not used; answer again when a card asks.
 - `.olp/hook-log.jsonl`: what each card showed (kind, count, undo status, verdict, time, whether a person chose anything, and the Claude Code tool call id to pair a card with its run). No paths, command text, or database names.
 - `.olp/first-run`, `.olp/used-day`: a time and a day number.
 - Outside the project, `<home>/olp/usage/<hash>.json`: your answer to the usage-numbers question (and, if yes, the random id, `npx` or `manual`, and when it last sent).
 
-On Unix the folder is `0700` and the files are `0600`. On Windows `.olp/` takes the folder permissions it is created in; this tool does not change them.
+On Unix the folders (`.olp/` and `~/.olp/projects/<key>/`) are `0700` and the files are `0600`. On Windows these folders take the permissions of the folder they are created in; this tool does not change them.
 
 `olp-hook setup` also adds `.olp/` to this repository's `.git/info/exclude` (once), so these files are not committed by accident.
 
@@ -247,13 +254,19 @@ Remove the `olp-hook` lines from your Claude Code settings (`olp-hook uninstall`
 - OLP still asks before commands it doesn't recognize yet, even read-only ones. We add more with every release.
 - On slow machines, PowerShell commands may trigger more prompts. Delete and overwrite cards still appear as before.
 - Operator mode, which would handle recoverable actions without asking, isn't here yet. We're building it.
+- Claude Code older than 2.1.295 doesn't know the hook setting that blocks a call when the hook fails, so there a failed or missing hook lets the call run.
 
 ## Limits
 
 - When the folder to delete is the working folder itself or one of its parents (for example `rm -rf /path/to/project` or `rm -rf .`), Claude Code shows its own "Dangerous rm" prompt and leaves OLP's card out of it, so one Yes would delete it without the file list. For that shape OLP stops the call instead of asking: nothing is deleted, the card goes to the agent, and it is told to rerun with a relative path or leave it to you in a terminal. PowerShell `Remove-Item` is not affected. Forms OLP cannot resolve to a folder, such as variables (`"$DIR"/*`), `bash -c "rm …"` or `/*` globs, still ask as before, so Claude Code's own prompt can still appear first for them.
 - `"onFailure": "block"` on the `PreToolUse` entry makes Claude Code block the call if `olp-hook` is missing, fails, or runs past `timeout` (Claude Code v2.1.295 or later). Without it, or on an older Claude Code, the tool may run anyway. Keep the `timeout` longer than `hook_budget_ms`: the hook stops itself at its budget (5 seconds by default), so the 10-second `timeout` leaves room before Claude Code steps in.
 - A family you mark `read_only` (for example `python`) passes as a whole. Only mark families that truly only read. Do not mark `git` itself `read_only`.
-- This edition does not hook Edit/Write, so the agent can change `.olp/hook-map.json` or `.claude/settings.json` with its file-edit tools. The six risky forms are still caught, but your other answers could be changed. Moving the answers outside the project (to your home folder) is planned for a later version, with no date yet.
+- This edition does not hook Edit/Write, so the agent can change `.claude/settings.json`, or your answers in `~/.olp/projects/<key>/`, with its file-edit tools. The six risky forms are still caught, but your other answers could be changed. The answers are now kept outside the project (in your home folder), so a cloned repository cannot bring its own; a `.olp/hook-map.json` inside the project is ignored.
+- A command that builds the folder name while it runs (for example by joining `'.o'` and `'lp'`) is not seen as writing to `~/.olp/` or `~/olp/`; it still gets the usual write card.
+- The same holds after the command changes folder (`cd ~ && …`) and then writes to a target made only of `*` or `?` (such as `*/projects/*/hook-map.json`), and for a write that goes through a link already placed in the repository: both still get the usual write card.
+- The other way round, a command that mentions `.olp` anywhere (even inside text, such as `echo "see ~/.olp" > notes.md`) is treated as touching OLP's own folder and is always blocked, unless it only reads (`cat`, `ls`, `grep` and the like, with no redirect).
+- This is not a security boundary against an agent that can run a shell and assemble the path itself (for example `X=.ol; … ${X}p/…`, or another program that builds the path and writes the file). It catches the common ways of writing to OLP's own files and shows them to you. A path written with shell expansions stacked on top of each other, or one whose value is computed, may not be caught.
+- The same goes for other names of the same folder: a Windows 8.3 short name (`OLP~1`), a junction or link under another name (including one an earlier command made, such as `ln -s ~/.olp x` and then a write to `x/…`), and another user's home written as `~user`.
 - For the same reason, an agent could use its file-edit tools to write the usage-numbers answer in `<home>/olp/usage/` and turn sending on. Only the numbers in the table above would be sent.
 - "Not run" after a card means the call did not report back as run. It cannot tell a "no" in the prompt from a failed run.
 - Counts are a read-only preview. They are not a promise of exactly what would disappear.

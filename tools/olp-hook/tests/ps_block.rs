@@ -38,7 +38,8 @@ fn c1_control_words_and_braces_are_never_classify_candidates() {
     let p = tmp("c1");
     let o = call(&p, "PowerShell", "if (Test-Path build) { mytool run } else { othertool go }; foreach ($f in $list) { mytool run }; try { mytool run } catch { othertool go } finally { mytool run }");
     let t = text(&o);
-    assert!(t.contains("classify --bash \"mytool run\""), "unknown command inside a block is a candidate: {t}");
+    // Ledger 1321 ①: a block is a bundle, so no remembered answer is offered at all (control words never were candidates either)
+    assert!(!t.contains("classify --bash"), "bundled command offers no remembered answer: {t}");
     for w in CONTROL {
         assert!(!t.contains(&format!("\"{w}\"")) && !t.contains(&format!("\"{w} ")), "control keyword {w} is a candidate: {t}");
     }
@@ -61,20 +62,8 @@ fn c2_deletes_inside_blocks_still_get_the_delete_card() {
     }
 }
 
-// A block with reads only gets no prompt (the realistic command itself is a card_v1 golden case)
-#[test]
-fn c3_read_only_blocks_show_no_card() {
-    for cmd in [
-        "if (Test-Path build) { Get-ChildItem build -Recurse | Measure-Object }",
-        "if (Test-Path build) { Get-ChildItem build } else { Test-Path .\\other }",
-        "try { Get-ChildItem build } catch { Get-Date }",
-    ] {
-        let p = tmp("c3");
-        let o = call(&p, "PowerShell", cmd);
-        assert_eq!(o.code, 0, "{cmd}: {}", o.stderr);
-        assert!(o.stdout.trim().is_empty(), "{cmd}: must produce no prompt: {}", o.stdout);
-    }
-}
+// A block with reads only (test c3_read_only_blocks_show_no_card):
+// moved to simple_form_only::reads_that_now_ask (rc4 rev 15: not a simple form → asks)
 
 // git check-ignore is a read (no prompt, no candidate), in both Bash and PowerShell
 #[test]
