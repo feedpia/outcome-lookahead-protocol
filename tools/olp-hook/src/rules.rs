@@ -69,7 +69,7 @@ pub fn broad(rule: &str) -> bool {
 
 /// Is a PowerShell rule prefix an expression (`[IO.File]::Delete(…)`, `$f.Delete()`, `(…)`, `{…}`, `;`) rather than a command name with arguments?
 /// Only for these can the PowerShell parser find a delete the built-in list misses (it only adds findings), so only these keep the parser in the rule check
-/// (review C1 of DESIGN_INSTALL_PROGRESS_012). Command-name rules take the same path as on macOS/Linux: no powershell.exe per rule.
+/// (install progress review). Command-name rules take the same path as on macOS/Linux: no powershell.exe per rule.
 fn expression(prefix: &str) -> bool {
     prefix.contains("::") || prefix.contains(['$', '(', ')', '[', ']', '{', '}', ';', '`'])
 }

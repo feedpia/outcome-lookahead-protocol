@@ -53,7 +53,7 @@ class SummarizeTest(unittest.TestCase):
 
 
 class MarkerGroupTest(unittest.TestCase):
-    """Group 9 (DESIGN_OLP_013_TAG_GATE §2-2 · C-9): broken install markers are counted apart from the 78 cells."""
+    """Group 9: broken install markers are counted apart from the 78 cells."""
 
     def test_marker_group_counts_separately(self):
         counts, ok = summarize([row() for _ in range(EXPECTED_CELLS)], [row() for _ in range(EXPECTED_MARKER)])

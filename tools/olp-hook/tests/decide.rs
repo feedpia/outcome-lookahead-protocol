@@ -1,4 +1,4 @@
-//! 0.1.3 ⓪ (DESIGN_OLP_REPLAY_013 §0-A): `decide()` is the hook's verdict with no writes; `run_hook` is the shell that
+//! 0.1.3 ⓪: `decide()` is the hook's verdict with no writes; `run_hook` is the shell that
 //! writes the record and the card. Same input and same disk -> same Route, and the shell's outcome follows the Route.
 use olp_hook::{decide, run_hook, HookRequest, Route};
 use serde_json::{json, Value};

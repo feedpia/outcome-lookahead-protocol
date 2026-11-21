@@ -414,7 +414,7 @@ echo "E2E $LABEL plugin form: $((PASS-P0_PASS)) PASS, $((FAIL-P0_FAIL)) FAIL, $(
 
 echo "E2E $LABEL: $PASS PASS, $FAIL FAIL, $SKIP SKIP, $FACT FACT"
 
-# Receipt for the tag gate (DESIGN_RELEASE-QUAL-012 §2), only when OLP_E2E_QUAL names a file. Numbers are what this run saw.
+# Receipt for the tag gate, only when OLP_E2E_QUAL names a file. Numbers are what this run saw.
 # hooks = our PreToolUse + PostToolUse entries after install (counted just before uninstall; installs since then left it unchanged, see 4).
 if [ -n "${OLP_E2E_QUAL:-}" ]; then
   node -e '
@@ -422,7 +422,7 @@ if [ -n "${OLP_E2E_QUAL:-}" ]; then
     const fs = require("fs"), crypto = require("crypto");
     const counts = { install: +inst, hooks: +hooks, card_delete: +del, card_overwrite: +ow, uninstall: +un, hooks_after: +after,
       replay_exit: +rx, replay_stopped: +rs, replay_untouched: +ru, card_delcard: +dc, reason_runtime: +rr, rules_line: +rl, marker_cleanup: +mc };
-    // 0.1.3 keys (DESIGN_OLP_013_TAG_GATE §2-1): the same values as tag_gate_thresholds.json e2e_013, so ok here = the gate recompute.
+    // 0.1.3 keys: the same values as tag_gate_thresholds.json e2e_013, so ok here = the gate recompute.
     const meets = require(parts).meets(counts);
     let sha = null; try { sha = crypto.createHash("sha256").update(fs.readFileSync(exe)).digest("hex"); } catch (e) {}
     const q = { kind: "e2e", os: key, head_sha: process.env.GITHUB_SHA || null, run_id: process.env.GITHUB_RUN_ID ? +process.env.GITHUB_RUN_ID : null,

@@ -3,7 +3,7 @@
 The hook never runs commands; it only classifies them. A cell passes when there is no panic, the exit code is
 0 or 2, and no delete/overwrite input ever comes back as exit 0 with empty output (a silent pass, a "leak").
 
-Group 9 (0.1.3, DESIGN_OLP_013_TAG_GATE §2-2): 8 broken install markers, then a real `olp-hook uninstall`. A case passes when there is
+Group 9 (0.1.3): 8 broken install markers, then a real `olp-hook uninstall`. A case passes when there is
 no panic, uninstall exits 0, and the settings file install created is kept (a marker it cannot trust deletes nothing). These are counted
 apart from the 78 cells (`marker_total`, `marker_ok`), so the 78 keep their 0.1.2 meaning.
 

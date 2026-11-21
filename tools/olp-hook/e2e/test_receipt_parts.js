@@ -1,4 +1,4 @@
-// Self-test for the e2e receipt pieces (DESIGN_OLP_013_TAG_GATE §6 E-meets · E-src, second review C3).
+// Self-test for the e2e receipt pieces.
 // Run: node --test tools/olp-hook/e2e/test_receipt_parts.js   (olp_e2e.sh runs it first, so a broken piece fails the e2e run)
 "use strict";
 const test = require("node:test");

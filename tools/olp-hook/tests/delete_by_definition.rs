@@ -1,4 +1,4 @@
-//! 0.1.3 (DESIGN_OLP_013_RULES §4·§6 T2~T4): forms whose definition is a delete show the existing delete card, and a delete whose target is only known at run time says why it was not counted.
+//! 0.1.3: forms whose definition is a delete show the existing delete card, and a delete whose target is only known at run time says why it was not counted.
 // Value: protects=mirror-copy purge, volume format, recycle-bin clear and `% Delete` ask with the delete card instead of the unknown-command card, and stay a card even after the first word is classified read_only;
 // a delete inside `sh -c` whose target is a `$` value says the target is only known at run time; fails_when=any of these forms passes, or shows the unknown-command card, or the tail reason stays "this form is not counted";
 // seam=classify::detect_dangers + classify::count_for; no_claim=no count for these forms (still "count not checked"), card text frame unchanged (card.rs).

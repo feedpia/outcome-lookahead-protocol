@@ -1,0 +1,46 @@
+# olp-bench — public benchmark runner, first real run.
+# The hook under test is the PUBLISHED npm package @feedpia/olp-linux-x64 (not a build from this tree), so anyone can repeat it.
+# The execution layer runs only here: a GitHub-hosted runner that is thrown away after the job (mark file in RUNNER_TEMP, T1).
+name: olp-bench
+on:
+  push:
+    branches: ["ci/olp-bench-*"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  bench:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      OLP_VERSION: "0.1.3"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Mark this runner as disposable
+        run: printf 'this runner is thrown away after the job\n' > "$RUNNER_TEMP/olp-bench-disposable-runner"
+      - name: Get the published hook
+        run: |
+          mkdir -p "$RUNNER_TEMP/pkg"
+          npm pack "@feedpia/olp-linux-x64@$OLP_VERSION" --pack-destination "$RUNNER_TEMP/pkg"
+          tar -xzf "$RUNNER_TEMP"/pkg/*.tgz -C "$RUNNER_TEMP/pkg"
+          echo "OLP_BENCH_HOOK=$RUNNER_TEMP/pkg/package/bin/olp-hook" >> "$GITHUB_ENV"
+          chmod +x "$RUNNER_TEMP/pkg/package/bin/olp-hook"
+          echo "npm integrity: $(npm view "@feedpia/olp-linux-x64@$OLP_VERSION" dist.integrity)"
+          sha256sum "$RUNNER_TEMP/pkg/package/bin/olp-hook"
+      - name: Runner tests (with the execution layer)
+        run: python3 -m unittest discover -s bench -p "test_*.py" -v
+      - name: Run the suite (predictions sealed before the first command)
+        run: |
+          mkdir -p "$RUNNER_TEMP/out"
+          python3 bench/olp_bench.py run --suite bench/suite --hook "$OLP_BENCH_HOOK" \
+            --out "$RUNNER_TEMP/out/results.jsonl" --work "$RUNNER_TEMP/olp-bench-run"
+          sha256sum "$RUNNER_TEMP/out/results.jsonl" "$RUNNER_TEMP/out/results.jsonl.sealed"
+      - name: Table and regression cases
+        run: |
+          python3 bench/olp_bench_report.py --results "$RUNNER_TEMP/out/results.jsonl" --cases bench/suite/cases.jsonl \
+            --out "$RUNNER_TEMP/out/TABLE.md" --regressions "$RUNNER_TEMP/out/regressions"
+          cat "$RUNNER_TEMP/out/TABLE.md" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: olp-bench-results
+          path: ${{ runner.temp }}/out/

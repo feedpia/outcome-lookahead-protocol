@@ -1,4 +1,4 @@
-//! `olp-hook replay` (0.1.3, DESIGN_OLP_REPLAY_013): re-judges the Bash/PowerShell commands in local Claude Code records with
+//! `olp-hook replay` (0.1.3): re-judges the Bash/PowerShell commands in local Claude Code records with
 //! the same `hook::decide` the hook uses. Runs none of the recorded commands (judging may start PowerShell's parser and
 //! read-only git commands), sends nothing, writes nothing in any project. The only write is
 //! `<home>/olp/replay-count.json` (`{"runs": n}`, no command text, never sent).

@@ -1,4 +1,4 @@
-//! 0.1.3 tag gate "fuzz" cell (DESIGN_OLP_013_FUZZ v2): feeds seeded random commands into the verdict engine and checks
+//! 0.1.3 tag gate "fuzz" cell: feeds seeded random commands into the verdict engine and checks
 //! (1) no panic (2) every hook call within its time limit (3) same input = same verdict (pure path) (4) delete disguises never leak as Read or QuietPass.
 //! No new package: random = SplitMix64 (15 lines below). Default = 1/10 of seed 1301 (smoke test); `OLP_FUZZ_FULL=1` = all 3 seeds in full.
 //! Output: when the `OLP_FUZZ_OUT` folder exists, `fuzz-<os>.json` (no command text, counts and digest only).
@@ -182,7 +182,7 @@ fn project(tag: &str) -> PathBuf {
     p
 }
 
-/// sha256 (FIPS 180-4): 64-character digest (the shape in DESIGN_OLP_013_TAG_GATE section 4), no new package.
+/// sha256 (FIPS 180-4): 64-character digest, no new package.
 fn sha256_hex(data: &[u8]) -> String {
     const K: [u32; 64] = [
         0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be,
@@ -382,7 +382,7 @@ fn fuzz_pure_lane() {
     let rep = run(&seeds, counts, &real_judge, &p);
     let ps = ps_lane(full());
     let secs = t.elapsed().as_secs_f64();
-    // receipt = DESIGN_OLP_013_TAG_GATE section 4, matched letter for letter with the FUZZ design in its review. No command text.
+    // receipt shape is fixed. No command text.
     // Judged keys: panics 0 · timeouts 0 · nondeterministic_pure 0 · full true · fuzz_gen, seeds, cases_pure at the threshold values. The rest is recorded only.
     let os_key = std::env::var("OLP_FUZZ_OS_KEY").unwrap_or_else(|_| format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH));
     let c_false_positive: usize = rep.c_routes.iter().filter(|(k, _)| !k.ends_with("Some(Read)")).map(|(_, n)| n).sum();
