@@ -345,7 +345,7 @@ pub fn remove_start_entry(original: &str) -> Result<Change, String> {
     remove_where(original, &[(START_EVENT, is_our_start_command)], None)
 }
 
-/// Which empty containers uninstall may delete after removing our entries (0.1.3 ⑤, DESIGN_OLP_013_INSTALL_GATE §5-1).
+/// Which empty containers uninstall may delete after removing our entries (0.1.3 ⑤).
 /// Never a list or `hooks` object that someone else made: `Listed` = only the keys the install marker says install created;
 /// `EmptiedByUs` = no marker (0.1.1·0.1.2 installs) — only event lists that held our entries and are empty now, and `hooks` if that emptied it.
 pub enum Prune<'a> {
@@ -654,7 +654,7 @@ pub fn run(cmd: &str, args: &[String], env: &InstallEnv) -> Result<String, Strin
         add_entries(original.as_deref(), &command_for(&dir.join(exe_name("olp-hook"))), replace)?
     };
     // Delete the whole file only when all hold: our entries were removed now, the marker for exactly this file says install created it,
-    // nothing else is left in it, and it is a plain file (not a link). Otherwise rewrite it as before (DESIGN_OLP_013_INSTALL_GATE §5-1 ③).
+    // nothing else is left in it, and it is a plain file (not a link). Otherwise rewrite it as before.
     let delete_file = cmd == "uninstall" && change.changed && marker.as_ref().is_some_and(|m| m.created_file) && is_empty_object(&change.text) && plain_file(&settings);
     if dry {
         out.push(format!("dry run — nothing was changed. {}:", settings.display()));

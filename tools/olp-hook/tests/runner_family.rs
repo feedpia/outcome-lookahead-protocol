@@ -1,4 +1,4 @@
-//! 0.1.3 rc4 (DESIGN_OLP013_RC4_RUNNER_KEY §3 + REVIEW_DESIGN_OLP013_RC4_RUNNER_KEY blocking 1·2): a package runner's group key is
+//! 0.1.3 rc4: a package runner's group key is
 //! «runner + package name». One package's answer never covers another, a key with only the runner is never stored, read or offered.
 //! Measured before the fix (0.1.2 and 0.1.3 rc3): `npx @feedpia/olp stats` was stored as bare `npx`, the block card itself
 //! suggested `classify --bash "npx"`, and afterwards `npx -y rimraf x` passed silently.

@@ -1,5 +1,5 @@
-//! Shared adversarial input list (DESIGN_OLP_RUNNER_DETECT1 2 section 3, DESIGN_OLP013_RC4_RUNNER_KEY 1-6 section 3).
-//! One row = one form. The rc4 suite asserts `key` and `card_never`; the self-guard suite (0.2.0 U3a) asserts `guard` from the same file.
+//! Shared adversarial input list.
+//! One row = one form. The rc4 suite asserts `key` and `card_never`; the self-guard suite asserts `guard` from the same file.
 //! Every row is either asserted or counted as not applied (`key` = `skip`), and the two numbers must add up to the rows read.
 //! All file operations happen only in throwaway folders under CARGO_TARGET_TMPDIR.
 use olp_hook::classify::{self, family_is_name, interpreter_only, runner_only, Limits};

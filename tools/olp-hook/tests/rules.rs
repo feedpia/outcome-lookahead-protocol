@@ -25,7 +25,7 @@ fn allow(file: &Path, rules: &[&str]) {
     fs::write(file, json!({ "permissions": { "allow": rules } }).to_string()).unwrap();
 }
 
-/// 0.1.3 ① (DESIGN_OLP_013_RULES §4·§6 T1): the install-end count no longer misses delete-by-definition forms, `Clear-Item`, and rules whose prefix runs any command.
+/// 0.1.3 ①: the install-end count no longer misses delete-by-definition forms, `Clear-Item`, and rules whose prefix runs any command.
 #[test]
 fn broad_counts_delete_by_definition_and_any_command_runners() {
     for r in [
@@ -173,7 +173,7 @@ fn install_ends_with_one_summary_card() {
     assert!(!un.contains("What OLP does now") && !un.contains("Permission rules"), "{un}");
 }
 
-// ---- Install progress (DESIGN_INSTALL_PROGRESS_012, owner ledger 1083-1085): the rule check used to start powershell.exe twice per PowerShell rule with no output (owner PC: 83 rules = 82 s).
+// ---- Install progress: the rule check used to start powershell.exe twice per PowerShell rule with no output (owner PC: 83 rules = 82 s).
 mod common;
 
 const SHORT: &str = "Installing OLP…";

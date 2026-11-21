@@ -296,7 +296,7 @@ fn t4_after_decision_counts_the_next_delete_within_ten_minutes() {
 
 // A decision card whose 10-minute window is still open is not frozen as "none" now; it is deferred to the next send
 #[test]
-fn f6_open_decision_window_waits_for_next_send() {
+fn f6_open_waits_for_next_send() {
     let (p, h) = tmp("f6_open");
     opt_in_to(&p, &h, "https://127.0.0.1:9/f6");
     let t = now() - 300;

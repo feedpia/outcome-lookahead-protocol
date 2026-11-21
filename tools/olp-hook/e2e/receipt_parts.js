@@ -1,4 +1,4 @@
-// Pieces of the e2e receipt that olp_e2e.sh uses (DESIGN_OLP_013_TAG_GATE §2-1 · §6), kept here so test_receipt_parts.js can test them.
+// Pieces of the e2e receipt that olp_e2e.sh uses, kept here so test_receipt_parts.js can test them.
 //   node receipt_parts.js runtime <classify.rs>   prints the RUNTIME_TARGET text (one match, or nothing)
 //   node receipt_parts.js rules <rules.rs>         prints "Permission rules: 1 'always allow' rule covers" (both pieces once, or nothing)
 "use strict";

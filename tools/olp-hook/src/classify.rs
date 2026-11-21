@@ -164,7 +164,7 @@ pub const BUILTIN_OVERWRITE_TOOLS: &[&str] = &["Write", "Edit", "MultiEdit", "No
 pub const SHELL_TOOLS: &[&str] = &["Bash", "PowerShell"];
 
 const DELETE_VERBS: &[&str] = &["rm", "rmdir", "unlink", "shred", "srm", "del", "erase", "rd", "ri", "remove-item", "trash", "trash-put"];
-/// Names whose definition is a delete but that take no file list (0.1.3, DESIGN_OLP_013_RULES §4): a drive format and a recycle-bin clear. Not in DELETE_VERBS, so `count_for` keeps "this form is not counted".
+/// Names whose definition is a delete but that take no file list (0.1.3): a drive format and a recycle-bin clear. Not in DELETE_VERBS, so `count_for` keeps "this form is not counted".
 const DELETE_BY_DEFINITION: &[&str] = &["format-volume", "clear-recyclebin"];
 const OVERWRITE_VERBS: &[&str] = &["cp", "mv", "dd", "truncate", "tee", "install", "rsync", "ln", "copy-item", "cpi", "move-item", "mi", "set-content", "out-file", "clear-content", "rename-item"];
 const WRAPPERS: &[&str] = &["sudo", "doas", "nohup", "time", "nice", "command", "exec", "env"];
@@ -213,7 +213,7 @@ pub fn family_of(words: &[String]) -> Option<String> {
     Some(w0)
 }
 
-/// Programs that start a package runner (DESIGN_OLP013_RC4_RUNNER_KEY §2-1). One-word runners run the package named next;
+/// Programs that start a package runner. One-word runners run the package named next;
 /// the others are runners only with the second word in `TWO_WORD_RUNNERS` (`npm run`, `yarn build` keep their 0.1.x key; design 1-6 adds `pnpm exec`, `yarn exec`).
 const RUNNER_PROGRAMS: &[&str] = &["npx", "pnpx", "bunx", "npm", "pnpm", "yarn", "bun"];
 const ONE_WORD_RUNNERS: &[&str] = &["npx", "pnpx", "bunx"];
@@ -289,7 +289,7 @@ pub fn runner_only(family: &str) -> bool {
     RUNNER_PROGRAMS.contains(&family) || TWO_WORD_RUNNERS.iter().any(|(a, b)| family.split_once(' ') == Some((a, b)))
 }
 
-/// Script interpreters, the closed list of DESIGN_OLP013_RC4_RUNNER_KEY 1-6 §2-1c (19): the group key is `<interpreter> <script path>`,
+/// Script interpreters, a closed list (19): the group key is `<interpreter> <script path>`,
 /// so one script's answer never covers another.
 const INTERPRETERS: &[&str] = &[
     "node", "nodejs", "deno", "bun", "tsx", "ts-node", "python", "python3", "py", "ruby", "perl", "php", "bash", "sh", "zsh", "dash", "pwsh", "powershell", "cmd",
@@ -1981,7 +1981,7 @@ fn runtime_target(w: &[String]) -> bool {
 
 const PATTERNS: &str = "the paths use patterns or variables";
 const NOT_COUNTED: &str = "this form is not counted";
-/// 0.1.3 ⑥-a reason (same `count not checked (reason)` frame, card.rs unchanged). Wording pending the two native-speaker checks (REVIEW_013_DESIGN_RULES Q4).
+/// 0.1.3 ⑥-a reason (same `count not checked (reason)` frame, card.rs unchanged). Wording pending two native-speaker checks.
 const RUNTIME_TARGET: &str = "the target is only known at run time";
 
 /// Path arguments of PowerShell `Remove-Item` (including aliases). Only known switches, `-Path`/`-LiteralPath` values and `-ErrorAction`-style values are skipped over;

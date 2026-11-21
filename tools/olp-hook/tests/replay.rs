@@ -1,4 +1,4 @@
-//! 0.1.3 ③ `olp-hook replay` (DESIGN_OLP_REPLAY_013 §3·§4·§6·§7, ledger 1223): re-judges recorded Bash/PowerShell commands
+//! 0.1.3 ③ `olp-hook replay`: re-judges recorded Bash/PowerShell commands
 //! with the same `decide()` the hook uses. Runs none of the recorded commands, sends nothing, writes nothing in any project; only `<home>/olp/replay-count.json`.
 use olp_hook::replay::{replay_cli, ReplayEnv};
 use serde_json::{json, Value};
